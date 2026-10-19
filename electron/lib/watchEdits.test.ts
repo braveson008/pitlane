@@ -1,0 +1,60 @@
+import { describe, expect, it } from "vitest";
+// eslint-disable-next-line @typescript-eslint/no-var-requires
+const { addWatch, editWatch, removeWatch, withIds, INTERVALS, MODELS } = require("./watchEdits.cjs");
+
+const servers = ["atlassian", "linear-work"];
+
+describe("editing watches", () => {
+  it("a new watch starts paused with sensible defaults and its own id", () => {
+    const [watch] = addWatch([], { kind: "ticket-assigned", server: "atlassian" }, { servers });
+    expect(watch).toMatchObject({ kind: "ticket-assigned", server: "atlassian", intervalSeconds: 300, model: "sonnet", enabled: false });
+    expect(watch.id).toMatch(/^w-/);
+  });
+
+  it("a ticket watch needs a tracker server this project has", () => {
+    expect(() => addWatch([], { kind: "ticket-assigned" }, { servers: [] })).toThrow(/no Jira or Linear/);
+    expect(() => addWatch([], { kind: "ticket-assigned", server: "slack" }, { servers })).toThrow(/not one of/);
+  });
+
+  it("the same watch twice is refused, but a second tracker is fine", () => {
+    const one = addWatch([], { kind: "review-requested" }, { servers });
+    expect(() => addWatch(one, { kind: "review-requested" }, { servers })).toThrow(/already/);
+    const two = addWatch(addWatch([], { kind: "ticket-assigned", server: "atlassian" }, { servers }), { kind: "ticket-assigned", server: "linear-work" }, { servers });
+    expect(two).toHaveLength(2);
+  });
+
+  it("an edit changes only the fields it may, to values it may", () => {
+    const watches = addWatch([], { kind: "ticket-assigned", server: "atlassian" }, { servers });
+    const [edited] = editWatch(watches, watches[0].id, { intervalSeconds: 1800, model: "opus", scope: "  SHOP project  ", kind: "review-requested", lastError: "x" }, { servers });
+    expect(edited).toMatchObject({ kind: "ticket-assigned", intervalSeconds: 1800, model: "opus", scope: "SHOP project" });
+    expect(edited.lastError).toBeUndefined();
+    expect(() => editWatch(watches, watches[0].id, { intervalSeconds: 7 }, { servers })).toThrow(/interval/);
+    expect(() => editWatch(watches, watches[0].id, { model: "gpt" }, { servers })).toThrow(/model/);
+  });
+
+  it("changing what a watch looks at forgets what it saw, so it does not start everything already there", () => {
+    const watches = addWatch([], { kind: "ticket-assigned", server: "atlassian" }, { servers }).map((watch: object) => ({ ...watch, baselined: true, lastCheckedAt: 5 }));
+    const [moved] = editWatch(watches, watches[0].id, { server: "linear-work" }, { servers });
+    expect(moved.baselined).toBeUndefined();
+    expect(moved.lastCheckedAt).toBeUndefined();
+    const [same] = editWatch(watches, watches[0].id, { model: "haiku" }, { servers });
+    expect(same.baselined).toBe(true);
+  });
+
+  it("an unknown watch is an error, and removing takes out exactly that one", () => {
+    const watches = addWatch(addWatch([], { kind: "review-requested" }, { servers }), { kind: "ticket-assigned", server: "atlassian" }, { servers });
+    expect(() => editWatch(watches, "w-nope", {}, { servers })).toThrow(/No such watch/);
+    expect(removeWatch(watches, watches[0].id).map((watch: { kind: string }) => watch.kind)).toEqual(["ticket-assigned"]);
+  });
+
+  it("older watches without ids get stable ones", () => {
+    const once = withIds([{ kind: "review-requested", intervalSeconds: 300 }]);
+    expect(once[0].id).toMatch(/^w-/);
+    expect(withIds(once)[0].id).toBe(once[0].id);
+  });
+
+  it("offers the intervals and models the editor cycles through", () => {
+    expect(INTERVALS).toEqual([300, 600, 1800, 3600]);
+    expect(MODELS).toEqual(["sonnet", "haiku", "opus"]);
+  });
+});

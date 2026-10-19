@@ -1,0 +1,97 @@
+{
+  "name": "pitlane",
+  "productName": "Pitlane",
+  "version": "0.1.1",
+  "private": true,
+  "description": "One calm window per project for your coding agents.",
+  "main": "electron/main.cjs",
+  "type": "module",
+  "scripts": {
+    "dev": "concurrently \"vite --host 127.0.0.1 --port 5274 --strictPort\" \"wait-on http://127.0.0.1:5274 && PITLANE_DEV_SERVER=http://127.0.0.1:5274 electron .\"",
+    "build": "tsc && vite build",
+    "test": "vitest run",
+    "smoke": "npm run build && node tests/m1-smoke.mjs",
+    "postinstall": "chmod +x node_modules/node-pty/prebuilds/darwin-*/spawn-helper",
+    "icons": "node scripts/make-icons.mjs",
+    "dist:unsigned": "node scripts/prepare-release.mjs --unsigned && npm run build && CSC_IDENTITY_AUTO_DISCOVERY=false electron-builder --mac dmg zip && node scripts/write-update-manifest.mjs --unsigned",
+    "dist:release": "node scripts/prepare-release.mjs && npm run build && node scripts/with-env.mjs electron-builder --mac dmg zip --publish never && node scripts/write-update-manifest.mjs",
+    "release:upload": "node scripts/with-env.mjs node scripts/upload-release.mjs"
+  },
+  "dependencies": {
+    "@xterm/addon-fit": "^0.11.0",
+    "@xterm/addon-webgl": "^0.19.0",
+    "@xterm/xterm": "^6.0.0",
+    "electron-updater": "^6.8.9",
+    "node-pty": "^1.1.0",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1"
+  },
+  "devDependencies": {
+    "@aws-sdk/client-s3": "^3.1153.0",
+    "@types/node": "^22.10.1",
+    "@types/react": "^18.3.12",
+    "@types/react-dom": "^18.3.1",
+    "@vitejs/plugin-react": "^4.3.4",
+    "concurrently": "^9.1.0",
+    "electron": "^44.2.0",
+    "electron-builder": "^26.15.3",
+    "playwright": "^1.61.1",
+    "typescript": "^5.7.2",
+    "vite": "^6.0.3",
+    "vitest": "^4.1.10",
+    "wait-on": "^8.0.1"
+  },
+  "allowScripts": {
+    "esbuild@0.25.12": true,
+    "node-pty@1.1.0": true
+  },
+  "build": {
+    "appId": "app.pitlane.desktop",
+    "productName": "Pitlane",
+    "artifactName": "${productName}-${version}-${arch}.${ext}",
+    "directories": {
+      "output": "release"
+    },
+    "asar": true,
+    "asarUnpack": [
+      "electron/agentHook.cjs",
+      "node_modules/node-pty/**"
+    ],
+    "files": [
+      "dist/**/*",
+      "electron/**/*",
+      "!electron/**/*.test.*",
+      "package.json",
+      "!node_modules/@xterm/**/*",
+      "!node_modules/react/**/*",
+      "!node_modules/react-dom/**/*",
+      "!node_modules/@vitejs/**/*"
+    ],
+    "extraResources": [
+      {
+        "from": "build/update-config.json",
+        "to": "update-config.json"
+      }
+    ],
+    "mac": {
+      "category": "public.app-category.developer-tools",
+      "target": [
+        "dmg",
+        "zip"
+      ],
+      "icon": "build/icon.icns",
+      "hardenedRuntime": true,
+      "entitlements": "build/entitlements.mac.plist",
+      "entitlementsInherit": "build/entitlements.mac.inherit.plist",
+      "notarize": true
+    },
+    "afterPack": "./scripts/adhoc-sign.cjs",
+    "afterSign": "./scripts/check-unpacked.cjs",
+    "afterAllArtifactBuild": "./scripts/notarize-dmg.cjs"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/braveson008/pitlane.git"
+  },
+  "license": "Apache-2.0"
+}

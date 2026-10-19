@@ -1,0 +1,9 @@
+import type { Ticket } from "../api";
+
+// The same order as electron/lib/dispatcher.cjs, so the numbers on screen are the order things start in.
+const PRIORITY: Record<string, number> = { review: 0, feedback: 1 };
+const rank = (ticket: Ticket) => PRIORITY[ticket.priority ?? ""] ?? 2;
+
+export const upNext = (tickets: Ticket[]) => tickets.filter((ticket) => ticket.state === "queued").sort((a, b) => rank(a) - rank(b) || a.firstSeenAt - b.firstSeenAt);
+
+export const notStarted = (tickets: Ticket[]) => tickets.filter((ticket) => ticket.state === "not-started").sort((a, b) => a.firstSeenAt - b.firstSeenAt);
