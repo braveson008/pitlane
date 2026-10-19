@@ -1,7 +1,7 @@
-export type HomeAction = "open" | "new" | "theme" | "help" | "up" | "down" | "park" | "limit" | "changes" | "watches" | "openPr" | "stop" | "clear" | "assigned";
+export type HomeAction = "open" | "new" | "theme" | "help" | "up" | "down" | "park" | "limit" | "changes" | "watches" | "openPr" | "stop" | "clear" | "assigned" | "update";
 
 const HOME: Record<string, HomeAction> = {
-  Enter: "open", n: "new", t: "theme", "?": "help", j: "down", k: "up", ArrowDown: "down", ArrowUp: "up", x: "park", L: "limit", c: "changes", w: "watches", p: "openPr", s: "stop", C: "clear", a: "assigned",
+  Enter: "open", n: "new", t: "theme", "?": "help", j: "down", k: "up", ArrowDown: "down", ArrowUp: "up", x: "park", L: "limit", c: "changes", w: "watches", p: "openPr", s: "stop", C: "clear", a: "assigned", U: "update",
 };
 
 /** Home screen keys are single keys; chords belong to the system and the session view. */

@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { api, isFailure, type AgentId, type Project, type Session, type Slot, type Ticket } from "../api";
 import { LocalFiles } from "./LocalFiles";
+import { UpdateNote, useUpdateState } from "./UpdateNote";
 import { ago, orderSessions, sessionMarker, stateLabel } from "../lib/sessionOrder";
 import { homeKey } from "../lib/keys";
 import { nextTheme, THEME_LABEL, THEME_ORDER, type ThemeId } from "../theme/themes";
@@ -37,11 +38,7 @@ export function Home({ project, theme, sessions, workspaces, tickets, pausedUnti
   const [stopping, setStopping] = useState<string | null>(null);
   const [showAssigned, setShowAssigned] = useState(false);
   const ordered = useMemo(() => orderSessions(sessions, now), [sessions, now]);
-  const [update, setUpdate] = useState<{ ready: boolean; version?: string } | null>(null);
-  useEffect(() => {
-    void api().updates.state().then(setUpdate);
-    return api().updates.onState(setUpdate);
-  }, []);
+  const update = useUpdateState();
   const watches = project.watches ?? [];
   const waiting = tickets.filter((ticket) => ticket.state === "needs-you" || ticket.state === "review-ready");
   const next = upNext(tickets);
@@ -153,6 +150,7 @@ export function Home({ project, theme, sessions, workspaces, tickets, pausedUnti
       if (!action) return;
       event.preventDefault();
       if (action === "watches") return onWatches();
+      if (action === "update") return void (update?.status === "ready" ? api().updates.install() : api().updates.check());
       if (action === "assigned") return setShowAssigned((shown) => !shown);
       if (action === "stop" && currentSession) return stop(currentSession);
       if (action === "clear") {
@@ -202,7 +200,7 @@ export function Home({ project, theme, sessions, workspaces, tickets, pausedUnti
           </>
         )}
         <span className="spacer" />
-        {update?.ready ? <span className="id">update {update.version} ready — quit to install</span> : null}
+        <UpdateNote />
         <span className="lo">{ordered.length} {ordered.length === 1 ? "session" : "sessions"}{running ? ` · ${running} running` : ""}</span>
       </header>
 
@@ -336,6 +334,7 @@ export function Home({ project, theme, sessions, workspaces, tickets, pausedUnti
             <p><span className="hi">n</span> <span className="lo">start a new agent session</span></p>
             <p><span className="hi">t</span> <span className="lo">next theme ({THEME_ORDER.map((id) => THEME_LABEL[id]).join(", ")})</span></p>
             <p><span className="hi">w</span> <span className="lo">watches: add, edit, switch on or off, remove</span></p>
+            <p><span className="hi">U</span> <span className="lo">restart into a new version once one is ready, or check for one</span></p>
             <p><span className="hi">s s</span> <span className="lo">stop the selected session's agent</span></p>
             <p><span className="hi">C</span> <span className="lo">clear ended sessions (ones holding kept work stay)</span></p>
             <p><span className="hi">a</span> <span className="lo">show or hide tickets that are not started · enter puts one up next · x takes it out</span></p>

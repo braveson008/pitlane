@@ -15,6 +15,8 @@ contextBridge.exposeInMainWorld("pitlane", {
   links: { open: (url) => ipcRenderer.invoke("links:open", { url }) },
   updates: {
     state: () => ipcRenderer.invoke("update:state"),
+    install: () => ipcRenderer.invoke("update:install"),
+    check: () => ipcRenderer.invoke("update:check"),
     onState: (handler) => {
       const listener = (_event, payload) => handler(payload);
       ipcRenderer.on("update:state", listener);

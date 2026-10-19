@@ -46,7 +46,32 @@ let windows;
 let sessions;
 let pool;
 let liveChanges;
-let updateState = null;
+// End-to-end tests only: a downloaded update, so the status line and its key can be seen.
+let updateState = E2E && process.env.PITLANE_FAKE_UPDATE ? JSON.parse(process.env.PITLANE_FAKE_UPDATE) : null;
+let updates = null;
+
+function installUpdate() {
+  // Quitting asks first when agents are running; the update is installed either way at the next quit.
+  updates?.install();
+}
+
+async function checkForUpdatesByHand() {
+  if (!updates) {
+    return void dialog.showMessageBox({ message: "Updates are checked in the installed app", detail: "This copy is a development build, or was built without an update feed." });
+  }
+  const state = await updates.check();
+  if (state.status === "ready") {
+    const { response } = await dialog.showMessageBox({ message: `Pitlane ${state.version} is ready`, detail: "Restart now to update. Agents that are running are stopped; their workspaces and changes are kept.", buttons: ["Restart Now", "Later", "What's New"], defaultId: 0, cancelId: 1 });
+    if (response === 0) installUpdate();
+    if (response === 2 && state.notesUrl) void shell.openExternal(state.notesUrl);
+  } else if (state.status === "downloading") {
+    dialog.showMessageBox({ message: `Pitlane ${state.version} is downloading`, detail: "You'll get a notification when it's ready." });
+  } else if (state.status === "current") {
+    dialog.showMessageBox({ message: "Pitlane is up to date", detail: `You have the latest version, ${app.getVersion()}.` });
+  } else if (state.status === "error") {
+    dialog.showMessageBox({ type: "warning", message: "Couldn't check for updates", detail: state.error });
+  }
+}
 let tickets;
 let dispatcher;
 const attachments = new Map();
@@ -126,9 +151,29 @@ function rebuildDockMenu() {
   }))));
 }
 
+function updateMenuItem() {
+  if (updateState?.status === "ready") return { label: `Restart to Update to ${updateState.version}`, click: () => installUpdate() };
+  if (updateState?.status === "downloading") return { label: `Downloading ${updateState.version}${updateState.percent ? ` (${updateState.percent}%)` : ""}…`, enabled: false };
+  return { label: "Check for Updates…", click: () => void checkForUpdatesByHand() };
+}
+
 function buildAppMenu() {
   Menu.setApplicationMenu(Menu.buildFromTemplate([
-    { role: "appMenu" },
+    {
+      label: app.name,
+      submenu: [
+        { role: "about" },
+        updateMenuItem(),
+        { type: "separator" },
+        { role: "services" },
+        { type: "separator" },
+        { role: "hide" },
+        { role: "hideOthers" },
+        { role: "unhide" },
+        { type: "separator" },
+        { role: "quit" },
+      ],
+    },
     { label: "File", submenu: [{ label: "Open Project…", accelerator: "CmdOrCtrl+N", click: () => windows.openPicker() }, { role: "close" }] },
     { role: "editMenu" },
     { role: "windowMenu" },
@@ -347,6 +392,10 @@ function notify(title, body, target) {
   note.on("close", forget);
   note.on("click", () => {
     forget();
+    if (!target?.projectId) {
+      const open = BrowserWindow.getAllWindows().find((window) => !window.isDestroyed());
+      return open ? open.focus() : windows.openPicker();
+    }
     const window = windows.openProject(target.projectId);
     if (!target.sessionId) return;
     const open = () => window.webContents.send("sessions:open", { sessionId: target.sessionId });
@@ -902,6 +951,8 @@ function registerIpc() {
     return project ? detectLocalFiles(project.path).catch(() => []) : [];
   });
   ipcMain.handle("update:state", () => updateState);
+  ipcMain.handle("update:install", () => installUpdate());
+  ipcMain.handle("update:check", () => checkForUpdatesByHand());
   ipcMain.handle("settings:get", () => settings());
   ipcMain.handle("settings:set", (_event, payload) => {
     const next = { ...settings(), ...(Object.hasOwn(BACKGROUND, payload?.defaultTheme || "") ? { defaultTheme: payload.defaultTheme } : {}) };
@@ -985,12 +1036,15 @@ app.whenReady().then(() => {
     }
   })();
   windows.restore();
-  startUpdates({
+  updates = startUpdates({
     autoUpdater: require("electron-updater").autoUpdater,
     packaged: app.isPackaged,
     config: readUpdateConfig(path.join(process.resourcesPath, "update-config.json")),
     onState: (state) => {
+      const becameReady = state.status === "ready" && updateState?.status !== "ready";
       updateState = state;
+      buildAppMenu();
+      if (becameReady) notify(`Pitlane ${state.version} is ready`, "Restart to update: press U on a project's home screen, or use the Pitlane menu.");
       for (const window of BrowserWindow.getAllWindows()) if (!window.isDestroyed()) window.webContents.send("update:state", state);
     },
     log: (message) => console.log(message),

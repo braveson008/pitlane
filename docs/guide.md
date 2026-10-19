@@ -13,8 +13,9 @@ This guide follows the order you meet things in.
 - [7. Reviewing teammates' pull requests](#7-reviewing-teammates-pull-requests)
 - [8. Live Changes](#8-live-changes)
 - [9. Themes](#9-themes)
-- [10. All keys](#10-all-keys)
-- [11. Troubleshooting](#11-troubleshooting)
+- [10. Updates](#10-updates)
+- [11. All keys](#11-all-keys)
+- [12. Troubleshooting](#12-troubleshooting)
 
 ---
 
@@ -186,20 +187,30 @@ The draft appears at the top of the home screen as *review ready*. Open it with 
 | ![Daylight](screenshots/daylight.png) **Daylight**: a plain light theme | ![Synthwave](screenshots/synthwave.png) **Synthwave**: violet with neon headings |
 | ![Midnight](screenshots/midnight.png) **Midnight**: a quiet dark blue | |
 
-## 10. All keys
+## 10. Updates
+
+Pitlane updates itself from this repository's [releases](https://github.com/braveson008/pitlane/releases).
+
+- **On its own:** it checks when it starts and every six hours, and downloads a new version in the background.
+- **When one is ready:** macOS shows a notification ("Pitlane 0.1.2 is ready"), and every window's status line says `0.1.2 ready · U restart to update`. Press `U` on a project's home screen, or click the note in a session's status line, to restart into it. If you don't, it installs the next time you quit.
+- **By hand:** **Pitlane → Check for Updates…** tells you whether you are up to date, or that a new version is downloading. Once it has downloaded, the item reads **Restart to Update to 0.1.2**, and the dialog has a **What's New** button for the release notes. `U` on the home screen does the same check while nothing is ready.
+
+Restarting stops running agents (you are asked first). Their workspaces, branches and changes are kept.
+
+## 11. All keys
 
 | Where | Keys |
 |---|---|
-| Home | `enter` open · `n` new session · `w` watches · `a` show/hide not started · `x` take out of up next · `s s` stop agent · `C` clear ended · `c` changes · `p` open PR · `x x` park held session · `L` agents at once · `t` theme · `?` help · `⌘K` switcher |
+| Home | `enter` open · `n` new session · `w` watches · `a` show/hide not started · `x` take out of up next · `s s` stop agent · `C` clear ended · `c` changes · `p` open PR · `x x` park held session · `L` agents at once · `t` theme · `U` update · `?` help · `⌘K` switcher |
 | Watches | `a` add · `e` edit · `space` on/off · `r` check now · `x x` remove · `esc` back |
 | Session | everything goes to the agent · `⌘↑` home · `⌘K` switcher · `⌥⌘←/→` prev/next · `⌘D` changes |
 | Changes | `k` keep · `r` revert · `R` revert hunk · `K` keep all · `X X` revert all · `j`/`J` files/hunks · `esc` back |
 | Review draft | `a a` approve & post · `e` edit · `v` verdict · `x` drop comment · `d d` discard · `esc` back |
 
-## 11. Troubleshooting
+## 12. Troubleshooting
 
 - **The ticket watch says "no Jira or Linear MCP server for this project".** Add the Atlassian or Linear MCP server to Claude Code (`claude mcp add …`), for the project or globally, and sign in to it once in a normal `claude` session.
 - **A watch shows `error`.** The message is under the watch. `r` checks again. A tracker that answers with prose instead of a list is treated as an error, never as "nothing assigned".
 - **"no GitHub login" on a session.** The project's account is not signed in to `gh`. Run `gh auth login` for it; the agent still runs, but cannot push.
 - **The folder moved.** The window offers *Locate…*; pick the new folder and everything (sessions, workspaces, Claude's MCP servers) follows it.
-- **An update is ready.** The status line says so; it installs the next time you quit.
+- **Did I miss an update?** Use **Pitlane → Check for Updates…**. If checking fails (offline, GitHub unreachable), the dialog says why; Pitlane tries again on its own later.

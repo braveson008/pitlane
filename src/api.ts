@@ -69,6 +69,13 @@ export interface LiveChanges {
   deletions: number;
 }
 
+export type UpdateState =
+  | { status: "idle" | "checking" }
+  | { status: "current"; version?: string }
+  | { status: "downloading"; version?: string; percent?: number }
+  | { status: "ready"; version?: string; notesUrl?: string }
+  | { status: "error"; error: string };
+
 export type WatchKind = "ticket-assigned" | "review-requested";
 
 export interface Watch {
@@ -127,8 +134,10 @@ interface PitlaneApi {
   };
   links: { open(url: string): Promise<void> };
   updates: {
-    state(): Promise<{ ready: boolean; version?: string } | null>;
-    onState(handler: (state: { ready: boolean; version?: string }) => void): () => void;
+    state(): Promise<UpdateState | null>;
+    onState(handler: (state: UpdateState) => void): () => void;
+    install(): Promise<void>;
+    check(): Promise<void>;
   };
   changes: {
     subscribe(sessionId: string): Promise<{ ok: boolean } | Failure>;

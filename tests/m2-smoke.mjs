@@ -182,7 +182,7 @@ await writeFile(path.join(fresh, "profile", "registry.json"), JSON.stringify({ p
   github: { host: "github.com", kind: "github", login: "someone" },
   watches: [{ kind: "ticket-assigned", server: "atlassian", enabled: false, intervalSeconds: 300, model: "sonnet" }],
 }] }));
-const second = await launch(fresh);
+const second = await launch(fresh, { PITLANE_FAKE_UPDATE: JSON.stringify({ status: "ready", version: "9.9.9" }) });
 try {
   const picker = await second.firstWindow();
   await picker.waitForLoadState("domcontentloaded");
@@ -191,6 +191,8 @@ try {
   await project.getByLabel("Watches").getByText("Tickets assigned to me").waitFor();
   assert.match(await project.getByLabel("Watches").innerText(), /paused/);
   console.log("PASS a project saved by an earlier version opens with its watches");
+  await until("the update note", async () => /9\.9\.9 ready · U restart to update/.test(await project.locator(".statusline").innerText()));
+  console.log("PASS a downloaded update says so in the status line, with the key that installs it");
 
   // "someone" is not a gh login on this machine, so the session starts without a token and says so.
   await project.keyboard.press("n");

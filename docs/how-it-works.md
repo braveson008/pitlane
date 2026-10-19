@@ -71,4 +71,4 @@ Tokens come from `gh auth token` / `glab` for the project's account and live onl
 
 ## Releases
 
-`npm run dist:release` makes a signed, notarized DMG and zip. A build made without `PITLANE_UPDATE_URL` updates from this repository's GitHub releases through electron-updater.
+`npm run dist:release` makes a signed, notarized DMG and zip. A build made without `PITLANE_UPDATE_URL` updates from this repository's GitHub releases through electron-updater. `electron/lib/updates.cjs` turns the updater's events into one state (`current`, `downloading`, `ready`, `error`) that the menu, the notification and every window's status line show; a ready update stops further checks and installs on restart or quit.

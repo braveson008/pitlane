@@ -7,6 +7,7 @@ import { api, type Project, type Session } from "../api";
 import { sessionKey, type SessionAction } from "../lib/keys";
 import { ago, stateLabel } from "../lib/sessionOrder";
 import { xtermTheme, type ThemeId } from "../theme/themes";
+import { UpdateNote } from "./UpdateNote";
 
 interface SessionViewProps {
   project: Project;
@@ -112,6 +113,8 @@ export function SessionView({ project, session, theme, onAction, onRestart }: Se
         <span>{session.name}</span>
         <span className="agent">{session.agent}</span>
         <span className={session.state === "running" ? "ok" : session.state === "failed" ? "need" : "lo"}>{stateLabel(session)} {ago(session.createdAt, Date.now())}</span>
+        <span className="spacer" />
+        <UpdateNote inSession />
       </header>
       <div
         className="terminal"

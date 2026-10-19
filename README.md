@@ -38,7 +38,7 @@ Developers who already use Claude Code or Codex and want them working through th
 
 ## Install
 
-Download the latest `.dmg` from [Releases](../../releases). Pitlane is macOS (Apple Silicon) only, signed and notarized, and updates itself from this repository's releases.
+Download the latest `.dmg` from [Releases](../../releases). Pitlane is macOS (Apple Silicon) only, signed and notarized, and updates itself from this repository's releases: you get a notification when a new version is ready, `U` restarts into it, and **Pitlane → Check for Updates…** checks by hand.
 
 You need:
 - [Claude Code](https://claude.com/claude-code) (or Codex), signed in;
@@ -49,7 +49,7 @@ You need:
 
 | Where | Keys |
 |---|---|
-| Home | `enter` open · `n` new session · `w` watches · `a` show not-started tickets · `x` take a ticket out of up next · `s s` stop an agent · `C` clear ended sessions · `c` changes · `p` open PR · `x x` park a held session · `L` agents at once · `t` theme · `?` help |
+| Home | `enter` open · `n` new session · `w` watches · `a` show not-started tickets · `x` take a ticket out of up next · `s s` stop an agent · `C` clear ended sessions · `c` changes · `p` open PR · `x x` park a held session · `L` agents at once · `t` theme · `U` update · `?` help |
 | Watches | `a` add · `e` edit (`↑↓` field, `←→` change) · `space` on/off · `r` check now · `x x` remove · `esc` back |
 | Session | everything goes to the agent · `⌘↑` home · `⌘K` switcher · `⌥⌘←/→` prev/next · `⌘D` changes |
 | Changes | `k` keep · `r` revert · `R` revert hunk · `K` keep all · `X X` revert all · `esc` back |

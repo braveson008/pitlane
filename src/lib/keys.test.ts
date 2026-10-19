@@ -28,6 +28,7 @@ describe("home keys", () => {
     expect(homeKey(key("s"))).toBe("stop");
     expect(homeKey(key("C", { shiftKey: true } as Partial<KeyboardEvent>))).toBe("clear");
     expect(homeKey(key("a"))).toBe("assigned");
+    expect(homeKey(key("U", { shiftKey: true } as Partial<KeyboardEvent>))).toBe("update");
     expect(homeKey(key(" "))).toBeNull();
   });
 
