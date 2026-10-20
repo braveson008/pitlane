@@ -17,12 +17,25 @@ function withIds(watches) {
   return (watches || []).map((watch) => (watch.id ? watch : { ...watch, id: `w-${crypto.createHash("sha1").update(`${watch.kind}|${watch.server ?? ""}`).digest("hex").slice(0, 8)}` }));
 }
 
-function addWatch(watches, { kind, server }, { servers }) {
+// Words shaped like ticket keys that are not: UTF-8, SHA-256, RFC-7231.
+const NOT_KEYS = new Set(["UTF", "ISO", "SHA", "RFC", "CVE", "AES", "ES", "HTTP", "TLS", "MD", "P", "V"]);
+
+/** The tracker keys a repository's branches and commits use, most used first: what "only from" should say for it. */
+function scopeFromHistory(log) {
+  const counts = new Map();
+  for (const [, prefix] of String(log).matchAll(/\b([A-Z][A-Z0-9]+)-\d+\b/g)) {
+    if (!NOT_KEYS.has(prefix)) counts.set(prefix, (counts.get(prefix) || 0) + 1);
+  }
+  return [...counts].filter(([, count]) => count >= 3).sort((a, b) => b[1] - a[1]).slice(0, 3).map(([prefix]) => prefix).join(" or ");
+}
+
+function addWatch(watches, { kind, server, scope }, { servers }) {
   if (!KINDS.includes(kind)) throw new Error(`Unknown watch kind ${kind}`);
   const watch = { id: newId(), kind, intervalSeconds: 300, model: "sonnet", enabled: false };
   if (kind === "ticket-assigned") {
     checkServer(server, servers);
     watch.server = server;
+    if (scope) watch.scope = String(scope).trim().slice(0, 120);
   }
   if (watches.some((existing) => sameTarget(existing, watch))) throw new Error("that watch is already there");
   return [...watches, watch];
@@ -78,4 +91,4 @@ function overlaps(projects, projectId) {
   return found;
 }
 
-module.exports = { addWatch, editWatch, removeWatch, withIds, overlaps, INTERVALS, MODELS, KINDS };
+module.exports = { addWatch, editWatch, removeWatch, withIds, overlaps, scopeFromHistory, INTERVALS, MODELS, KINDS };

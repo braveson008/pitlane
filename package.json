@@ -1,7 +1,7 @@
 {
   "name": "pitlane",
   "productName": "Pitlane",
-  "version": "0.1.3",
+  "version": "0.1.4",
   "private": true,
   "description": "One calm window per project for your coding agents.",
   "main": "electron/main.cjs",

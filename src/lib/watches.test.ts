@@ -21,5 +21,6 @@ describe("watch labels", () => {
   it("say which projects get the same tickets and what fixes it", () => {
     expect(overlapNote(["admin"])).toBe("admin gets these same tickets · set only from to this project's Jira key or Linear team");
     expect(overlapNote(["a", "b"])).toMatch(/^a and b get these same tickets/);
+    expect(overlapNote(["admin"], "SHOP")).toBe("admin gets these same tickets · set only from to SHOP");
   });
 });

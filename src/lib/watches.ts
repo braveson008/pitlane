@@ -15,7 +15,7 @@ export function watchSource(watch: { kind: WatchKind | string; server?: string }
   return watch.server ?? "no server";
 }
 
-export function overlapNote(names: string[]) {
+export function overlapNote(names: string[], suggested = "") {
   const who = names.length > 1 ? `${names.slice(0, -1).join(", ")} and ${names.at(-1)} get` : `${names[0]} gets`;
-  return `${who} these same tickets · set only from to this project's Jira key or Linear team`;
+  return `${who} these same tickets · set only from to ${suggested || "this project's Jira key or Linear team"}`;
 }

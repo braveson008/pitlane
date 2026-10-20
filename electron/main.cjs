@@ -11,7 +11,7 @@ const { runGit } = require("./lib/git.cjs");
 const { credentialEnv, reviewerEnv } = require("./lib/credentials.cjs");
 const { carryMovedProjects } = require("./lib/projectMoves.cjs");
 const { startUpdates, readUpdateConfig } = require("./lib/updates.cjs");
-const { addWatch, editWatch, removeWatch, withIds, overlaps } = require("./lib/watchEdits.cjs");
+const { addWatch, editWatch, removeWatch, withIds, overlaps, scopeFromHistory } = require("./lib/watchEdits.cjs");
 const { ensureClaudeTrust } = require("./lib/claudeTrust.cjs");
 const { hookSettings } = require("./lib/agentEvents.cjs");
 const { createTicketBook } = require("./lib/tickets.cjs");
@@ -575,6 +575,12 @@ function trackerServersFor(project) {
   return [...new Set(names.filter((name) => ["atlassian", "linear"].includes(trackerSourceFamily(name))))];
 }
 
+/** One account often reaches several companies' trackers; the keys this repository's history uses say which are its own. */
+async function historyScope(project) {
+  const log = await runGit(project.path, ["log", "--all", "-n", "500", "--format=%s%n%D"]).catch(() => "");
+  return scopeFromHistory(log);
+}
+
 let polling = false;
 /** Polls each enabled watch that is due; the first successful poll of a watch only records what is already assigned. */
 async function pollWatches() {
@@ -640,8 +646,16 @@ function registerWatchIpc() {
     const project = registry.get(payload?.id);
     return project ? trackerServersFor(project) : [];
   });
-  ipcMain.handle("watches:create", (_event, payload) => withProject(payload, (project, watches) =>
-    registry.update(project.id, { watches: addWatch(watches, { kind: payload?.kind, server: payload?.server }, { servers: trackerServersFor(project) }) })));
+  ipcMain.handle("watches:suggest-scope", async (_event, payload) => {
+    const project = registry.get(payload?.id);
+    return project ? historyScope(project) : "";
+  });
+  ipcMain.handle("watches:create", async (_event, payload) => {
+    const project = registry.get(payload?.id);
+    const scope = project && payload?.kind === "ticket-assigned" ? await historyScope(project) : "";
+    return withProject(payload, (current, watches) =>
+      registry.update(current.id, { watches: addWatch(watches, { kind: payload?.kind, server: payload?.server, scope }, { servers: trackerServersFor(current) }) }));
+  });
   ipcMain.handle("watches:edit", (_event, payload) => withProject(payload, (project, watches) => {
     const patch = payload?.patch || {};
     const edited = editWatch(watches, String(payload?.watchId), { intervalSeconds: patch.intervalSeconds, model: patch.model, server: patch.server, scope: patch.scope }, { servers: trackerServersFor(project) });

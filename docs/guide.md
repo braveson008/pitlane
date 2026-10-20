@@ -110,7 +110,7 @@ On the watches screen:
 When editing (`↑↓` moves between fields, `←→` changes one):
 
 - **tracker**: which Jira or Linear server to read, if Claude has more than one.
-- **only from**: narrow the watch to one Jira project, Linear team or site, such as `SHOP project`. Needed whenever two projects watch the same tracker: without it, each gets every ticket assigned to you. Pitlane warns on both screens when two projects' watches would get the same tickets, and never lets two projects start the same ticket.
+- **only from**: narrow the watch to one Jira project, Linear team or site, such as `SHOP project`. Needed whenever two projects watch the same tracker: without it, each gets every ticket assigned to you. Pitlane warns on both screens when two projects' watches would get the same tickets, and never lets two projects start the same ticket. A new ticket watch starts scoped to the keys the repository's branches and commits use (`SHOP`, `ADMIN or OPS`), and the editor shows that suggestion for an unscoped one: Enter on **only from** fills it in.
 - **checks**: every 5, 10, 30 or 60 minutes.
 - **model**: Sonnet, Haiku or Opus for reading the tracker.
 

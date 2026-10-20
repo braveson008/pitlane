@@ -7,7 +7,7 @@ import { homeKey } from "../lib/keys";
 import { nextTheme, THEME_LABEL, THEME_ORDER, type ThemeId } from "../theme/themes";
 import { notStarted, ticketLabel, upNext } from "../lib/queue";
 import { overlapNote, watchSource, watchTitle } from "../lib/watches";
-import { useOverlaps } from "./Watches";
+import { useOverlaps, useSuggestedScope } from "./Watches";
 
 const AGENT_CHOICES: AgentId[] = ["claude", "codex"];
 
@@ -42,6 +42,7 @@ export function Home({ project, theme, sessions, workspaces, tickets, pausedUnti
   const update = useUpdateState();
   const watches = project.watches ?? [];
   const overlapping = useOverlaps(project);
+  const suggested = useSuggestedScope(project);
   const waiting = tickets.filter((ticket) => ticket.state === "needs-you" || ticket.state === "review-ready");
   const next = upNext(tickets);
   const assigned = notStarted(tickets);
@@ -327,7 +328,7 @@ export function Home({ project, theme, sessions, workspaces, tickets, pausedUnti
             <p className="lo">No watches yet · w to add one</p>
           )}
           {watches.some((watch) => watch.lastError) ? <p className="need">  {watches.find((watch) => watch.lastError)?.lastError}</p> : null}
-          {watches.some((watch) => overlapping[watch.id]) ? <p className="need">  {overlapNote(overlapping[watches.find((watch) => overlapping[watch.id])!.id])} · w to set it</p> : null}
+          {watches.some((watch) => overlapping[watch.id]) ? <p className="need">  {overlapNote(overlapping[watches.find((watch) => overlapping[watch.id])!.id], suggested)} · w to set it</p> : null}
         </section>
 
         {help ? (

@@ -24,6 +24,13 @@ export function useOverlaps(project: Project) {
   return overlaps;
 }
 
+/** The "only from" this repository's history points at, or "". */
+export function useSuggestedScope(project: Project) {
+  const [suggested, setSuggested] = useState("");
+  useEffect(() => { void api().watches.suggestScope(project.id).then(setSuggested); }, [project.id]);
+  return suggested;
+}
+
 /** Every watch of the project, and everything about each one the owner can change. */
 export function Watches({ project, onProject, onBack }: WatchesProps) {
   const watches = project.watches ?? [];
@@ -36,6 +43,7 @@ export function Watches({ project, onProject, onBack }: WatchesProps) {
   const [error, setError] = useState("");
   const [now, setNow] = useState(Date.now());
   const overlapping = useOverlaps(project);
+  const suggested = useSuggestedScope(project);
   const current: Watch | undefined = watches[Math.min(at, watches.length - 1)];
 
   useEffect(() => { void api().watches.servers(project.id).then(setServers); }, [project.id]);
@@ -101,7 +109,7 @@ export function Watches({ project, onProject, onBack }: WatchesProps) {
         if (event.key === "ArrowRight" || event.key === "l" || event.key === " ") change(editing, 1);
         if (event.key === "ArrowLeft" || event.key === "h") change(editing, -1);
         if (event.key === "Enter") {
-          if (editing === "scope") setScope(current?.scope ?? "");
+          if (editing === "scope") setScope(current?.scope || suggested);
           else change(editing, 1);
         }
         return;
@@ -137,7 +145,7 @@ export function Watches({ project, onProject, onBack }: WatchesProps) {
   const value = (field: Field) => {
     if (!current) return "";
     if (field === "server") return current.server ?? "none";
-    if (field === "scope") return current.scope || "everything assigned to me";
+    if (field === "scope") return current.scope || `everything assigned to me${suggested ? ` · this repository uses ${suggested}` : ""}`;
     if (field === "interval") return `every ${Math.round(current.intervalSeconds / 60)}m`;
     return current.model;
   };
@@ -166,7 +174,7 @@ export function Watches({ project, onProject, onBack }: WatchesProps) {
             </button>
           ))}</div>
           {current?.lastError ? <p className="need">  {current.lastError}</p> : null}
-          {current && overlapping[current.id] ? <p className="need">  {overlapNote(overlapping[current.id])} · e to edit</p> : null}
+          {current && overlapping[current.id] ? <p className="need">  {overlapNote(overlapping[current.id], suggested)} · e to edit</p> : null}
           {removing && removing === current?.id ? <p className="need">  remove this watch? x again — what it found stays on the home screen</p> : null}
         </section>
 

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 // eslint-disable-next-line @typescript-eslint/no-var-requires
-const { addWatch, editWatch, removeWatch, withIds, overlaps, INTERVALS, MODELS } = require("./watchEdits.cjs");
+const { addWatch, editWatch, removeWatch, withIds, overlaps, scopeFromHistory, INTERVALS, MODELS } = require("./watchEdits.cjs");
 
 const servers = ["atlassian", "linear-work"];
 
@@ -68,5 +68,17 @@ describe("editing watches", () => {
     ];
     expect(overlaps(projects, "fe")).toEqual({ "w-fe": ["admin"] });
     expect(overlaps(projects, "api")).toEqual({});
+  });
+
+  it("a new ticket watch starts scoped to what the repository's history names", () => {
+    const [watch] = addWatch([], { kind: "ticket-assigned", server: "atlassian", scope: "SHOP" }, { servers });
+    expect(watch.scope).toBe("SHOP");
+  });
+
+  it("reads the ticket keys a repository's branches and commits use", () => {
+    const log = ["SHOP-12 fix header", "Merge SHOP-14", "feature/SHOP-20-cart", "SPIKE-1 spike", "SHOP-3", "ADMIN-1 once"].join("\n");
+    expect(scopeFromHistory(log)).toBe("SHOP");
+    expect(scopeFromHistory("ADMIN-1\nADMIN-2\nADMIN-3\nOPS-1\nOPS-2\nOPS-3")).toBe("ADMIN or OPS");
+    expect(scopeFromHistory("fix typo\nUTF-8 support")).toBe("");
   });
 });

@@ -163,6 +163,8 @@ interface PitlaneApi {
     check(id: string, watchId: string): Promise<Project | Failure>;
     /** For each watch, the other projects whose watch gets the same tickets. */
     overlaps(id: string): Promise<Record<string, string[]>>;
+    /** The tracker keys this repository's history uses, as an "only from" value, or "". */
+    suggestScope(id: string): Promise<string>;
   };
   reviews: {
     update(projectId: string, key: string, draft: Draft): Promise<Ticket | Failure>;
