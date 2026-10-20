@@ -26,6 +26,8 @@ function createDispatcher({ projects, book, start, running, maxAgents, now = Dat
       if (result.ok) {
         book.set(project.id, ticket.key, { state: "working", sessionId: result.sessionId, ...(result.branch ? { branch: result.branch } : {}) });
         started.push(ticket.key);
+      } else if (result.setAside) {
+        book.set(project.id, ticket.key, result.setAside);
       } else if (result.busy) {
         blocked.add(project.id);
       } else {

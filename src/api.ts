@@ -113,6 +113,13 @@ export interface Ticket {
   sessionId?: string;
   prUrl?: string;
   reason?: string;
+  /** The tracker's own status, and its category: only a "todo" ticket is queued by itself. */
+  status?: string;
+  stage?: "todo" | "started" | "done";
+  /** The other project that already has this ticket. */
+  elsewhere?: string;
+  /** Put up next by the owner, so it starts even though the tracker shows it under way. */
+  chosen?: boolean;
   firstSeenAt: number;
   updatedAt: number;
 }
@@ -154,6 +161,8 @@ interface PitlaneApi {
     remove(id: string, watchId: string): Promise<Project | Failure>;
     toggle(id: string, watchId: string): Promise<Project | Failure>;
     check(id: string, watchId: string): Promise<Project | Failure>;
+    /** For each watch, the other projects whose watch gets the same tickets. */
+    overlaps(id: string): Promise<Record<string, string[]>>;
   };
   reviews: {
     update(projectId: string, key: string, draft: Draft): Promise<Ticket | Failure>;

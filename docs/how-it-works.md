@@ -39,7 +39,7 @@ claude -p --output-format json --model sonnet --permission-mode dontAsk \
   --allowedTools <the tracker's read-only MCP tools>
 ```
 
-with a prompt asking for open tickets assigned to you, as JSON, optionally only from the watch's scope. `dontAsk` refuses any tool that was not explicitly allowed. An answer that is not a list, or an empty list right after a full one, is treated as an error rather than "everything was unassigned".
+with a prompt asking for open tickets assigned to you, as JSON, optionally only from the watch's scope. Each ticket carries its status and a stage taken from the tracker's own status category (`todo`, `started`, `done`); only `todo` tickets queue themselves, and the stage is checked again when the ticket is read in full just before it starts. `dontAsk` refuses any tool that was not explicitly allowed. An answer that is not a list, or an empty list right after a full one, is treated as an error rather than "everything was unassigned".
 
 The **ticket book** (`electron/lib/tickets.cjs`) remembers every ticket a watch has seen, per project, and its state:
 

@@ -11,7 +11,7 @@ const { runGit } = require("./lib/git.cjs");
 const { credentialEnv, reviewerEnv } = require("./lib/credentials.cjs");
 const { carryMovedProjects } = require("./lib/projectMoves.cjs");
 const { startUpdates, readUpdateConfig } = require("./lib/updates.cjs");
-const { addWatch, editWatch, removeWatch, withIds } = require("./lib/watchEdits.cjs");
+const { addWatch, editWatch, removeWatch, withIds, overlaps } = require("./lib/watchEdits.cjs");
 const { ensureClaudeTrust } = require("./lib/claudeTrust.cjs");
 const { hookSettings } = require("./lib/agentEvents.cjs");
 const { createTicketBook } = require("./lib/tickets.cjs");
@@ -145,10 +145,11 @@ function createWindow(projectId) {
 
 function rebuildDockMenu() {
   if (!app.dock) return;
-  app.dock.setMenu(Menu.buildFromTemplate(registry.list().map((project) => ({
-    label: project.name,
-    click: () => windows.openProject(project.id),
-  }))));
+  app.dock.setMenu(Menu.buildFromTemplate([
+    ...registry.list().map((project) => ({ label: project.name, click: () => windows.openProject(project.id) })),
+    { type: "separator" },
+    { label: "Open Project…", click: () => windows.openPicker() },
+  ]));
 }
 
 function updateMenuItem() {
@@ -338,6 +339,12 @@ async function startReview(project, item) {
   return { ok: true, sessionId: result.id };
 }
 
+/** The project already working on this ticket, so two projects never both take it. */
+function heldElsewhere(projectId, key) {
+  const holder = registry.list().find((other) => other.id !== projectId && tickets.get(other.id, key) && !["dropped", "not-started"].includes(tickets.get(other.id, key).state));
+  return holder ? holder.name : null;
+}
+
 /** Starts the project's lead agent on one ticket: its branch (adopted if one exists), the ticket in full, the workflow. */
 async function startTicket(project, ticket) {
   const remote = await remoteBranches(project.path);
@@ -349,6 +356,10 @@ async function startTicket(project, ticket) {
   const full = watch ? await readTicket({ cwd: project.path, server: watch.server, scope: watch.scope, key: ticket.key, model: watch.model }).catch(() => null) : null;
   // Without its description an unattended agent would work from the title alone.
   if (watch && !full) return { ok: false, error: "could not read the ticket from the tracker" };
+  // The poll may be minutes old; a ticket that has moved on since is not started unless the owner chose it.
+  if (!ticket.chosen && full?.stage && full.stage !== "todo") return { ok: false, setAside: { state: full.stage === "done" ? "dropped" : "not-started", status: full.status, stage: full.stage } };
+  const elsewhere = !ticket.chosen && heldElsewhere(project.id, ticket.key);
+  if (elsewhere) return { ok: false, setAside: { state: "not-started", elsewhere } };
   // The branch may still be in a slot an earlier attempt left held; its work is kept as a local commit first.
   const holding = pool.slots(project).find((slot) => slot.state === "held" && slot.branch === branch);
   if (holding) await pool.park(project, holding.index, holding.sessionId).catch(() => {});
@@ -588,7 +599,7 @@ async function pollWatches() {
           live.lastError = result.error;
         } else {
           delete live.lastError;
-          const outcome = tickets.observe(project.id, result.tasks, { baseline: !live.baselined, kind: watch.kind === "review-requested" ? "review" : "ticket" });
+          const outcome = tickets.observe(project.id, result.tasks, { baseline: !live.baselined, kind: watch.kind === "review-requested" ? "review" : "ticket", heldElsewhere: (key) => heldElsewhere(project.id, key) });
           live.baselined = true;
           for (const key of outcome.flagged) notify(`${key} needs you`, "It is no longer assigned to you.", { projectId: project.id });
           broadcastTickets(project.id);
@@ -624,6 +635,7 @@ function registerWatchIpc() {
       return failure(error);
     }
   };
+  ipcMain.handle("watches:overlaps", (_event, payload) => overlaps(registry.list(), String(payload?.id || "")));
   ipcMain.handle("watches:servers", (_event, payload) => {
     const project = registry.get(payload?.id);
     return project ? trackerServersFor(project) : [];
@@ -700,7 +712,7 @@ function registerWatchIpc() {
     const ticket = tickets.get(projectId, String(payload?.key || ""));
     if (!ticket) return failure("Unknown ticket");
     const alive = ticket.sessionId && sessions.get(ticket.sessionId)?.state === "running";
-    if (!alive && (ticket.state === "not-started" || ticket.state === "needs-you")) setTicket(projectId, ticket.key, { state: "queued", reason: undefined });
+    if (!alive && (ticket.state === "not-started" || ticket.state === "needs-you")) setTicket(projectId, ticket.key, { state: "queued", reason: undefined, chosen: true });
     void dispatch();
     return { ok: true };
   });
@@ -708,7 +720,7 @@ function registerWatchIpc() {
     const projectId = String(payload?.projectId || "");
     const ticket = tickets.get(projectId, String(payload?.key || ""));
     if (!ticket || ticket.state !== "queued") return failure("Only a ticket that is up next can be taken out");
-    setTicket(projectId, ticket.key, { state: "not-started" });
+    setTicket(projectId, ticket.key, { state: "not-started", chosen: undefined });
     return { ok: true };
   });
 }
@@ -901,8 +913,8 @@ function registerIpc() {
       return failure(error);
     }
   });
-  ipcMain.handle("projects:open", (_event, payload) => {
-    if (registry.get(payload?.id)) windows.openProject(payload.id);
+  ipcMain.handle("projects:open", (event, payload) => {
+    if (registry.get(payload?.id)) windows.openProject(payload.id, { from: BrowserWindow.fromWebContents(event.sender) });
     return { ok: true };
   });
   ipcMain.handle("projects:status", (_event, payload) => registry.status(payload?.id));

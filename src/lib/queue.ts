@@ -7,3 +7,10 @@ const rank = (ticket: Ticket) => PRIORITY[ticket.priority ?? ""] ?? 2;
 export const upNext = (tickets: Ticket[]) => tickets.filter((ticket) => ticket.state === "queued").sort((a, b) => rank(a) - rank(b) || a.firstSeenAt - b.firstSeenAt);
 
 export const notStarted = (tickets: Ticket[]) => tickets.filter((ticket) => ticket.state === "not-started").sort((a, b) => a.firstSeenAt - b.firstSeenAt);
+
+export function ticketLabel(ticket: Ticket) {
+  if (ticket.priority === "review" || ticket.key.startsWith("review:")) return "review";
+  if (ticket.priority === "feedback") return "feedback";
+  if (ticket.elsewhere) return `in ${ticket.elsewhere}`;
+  return ticket.status || "ticket";
+}

@@ -6,10 +6,11 @@ function createTicketBook({ store, now = Date.now }) {
   const of = (projectId) => (all[projectId] ||= []);
   const find = (projectId, key) => of(projectId).find((ticket) => ticket.key === key);
   const empties = {};
+  const tracked = (task) => ({ ...(task.status ? { status: task.status } : {}), ...(task.stage ? { stage: task.stage } : {}) });
 
   return {
     list: (projectId) => of(projectId).map((ticket) => ({ ...ticket })),
-    observe(projectId, tasks, { baseline, limit = 25, kind }) {
+    observe(projectId, tasks, { baseline, limit = 25, kind, heldElsewhere = () => null }) {
       const at = now();
       // Ticket and review watches share the book; each poll judges only the records of its own kind.
       const mine = (ticket) => !kind || (kind === "review") === String(ticket.key).startsWith("review:");
@@ -29,23 +30,29 @@ function createTicketBook({ store, now = Date.now }) {
       for (const task of valid) {
         const existing = find(projectId, task.id);
         if (existing) {
-          Object.assign(existing, { title: task.title || existing.title, url: task.url || existing.url });
+          Object.assign(existing, { title: task.title || existing.title, url: task.url || existing.url, ...tracked(task) });
           // Back in the list after dropping out: it resumes where it was, it is not new work.
-          if (existing.state === "dropped") Object.assign(existing, { state: existing.previousState || "not-started", updatedAt: at });
+          if (existing.state === "dropped" && task.stage !== "done") Object.assign(existing, { state: existing.previousState || "not-started", updatedAt: at });
+          if (task.stage === "done" && ["queued", "not-started"].includes(existing.state)) Object.assign(existing, { previousState: existing.state, state: "dropped", updatedAt: at });
+          else if (task.stage === "started" && existing.state === "queued" && !existing.chosen) Object.assign(existing, { state: "not-started", updatedAt: at });
           continue;
         }
+        if (task.stage === "done") continue;
+        const elsewhere = heldElsewhere(task.id);
         const ticket = {
           key: task.id,
           title: task.title,
           description: task.description || "",
           url: task.url || "",
-          state: baseline || task.pr?.trusted === false ? "not-started" : "queued",
+          ...tracked(task),
+          state: baseline || task.pr?.trusted === false || task.stage === "started" || elsewhere ? "not-started" : "queued",
+          ...(elsewhere ? { elsewhere } : {}),
           ...(task.pr ? { pr: task.pr, priority: "review" } : {}),
           firstSeenAt: at,
           updatedAt: at,
         };
         of(projectId).push(ticket);
-        if (!baseline) queued.push({ ...ticket });
+        if (ticket.state === "queued") queued.push({ ...ticket });
       }
       const dropped = [];
       const flagged = [];

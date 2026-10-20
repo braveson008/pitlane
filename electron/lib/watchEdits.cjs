@@ -65,4 +65,17 @@ function removeWatch(watches, id) {
   return watches.filter((watch) => watch.id !== id);
 }
 
-module.exports = { addWatch, editWatch, removeWatch, withIds, INTERVALS, MODELS, KINDS };
+/** For each of this project's ticket watches, the other projects whose enabled watch asks the same tracker the same question. */
+function overlaps(projects, projectId) {
+  const ticketWatches = (project) => withIds(project.watches).filter((watch) => watch.kind === "ticket-assigned" && watch.server);
+  const project = projects.find((each) => each.id === projectId);
+  const found = {};
+  for (const watch of project ? ticketWatches(project) : []) {
+    const sameAsk = (other) => other.enabled && other.server === watch.server && (other.scope ?? "").toLowerCase() === (watch.scope ?? "").toLowerCase();
+    const names = projects.filter((other) => other.id !== projectId && ticketWatches(other).some(sameAsk)).map((other) => other.name);
+    if (names.length) found[watch.id] = names;
+  }
+  return found;
+}
+
+module.exports = { addWatch, editWatch, removeWatch, withIds, overlaps, INTERVALS, MODELS, KINDS };

@@ -131,4 +131,41 @@ describe("ticket book", () => {
     expect(tickets.get("p", "review:1")).toBeUndefined();
     expect(tickets.observe("p", [review], { baseline: false, kind: "review" }).queued.map((each: { key: string }) => each.key)).toEqual(["review:1"]);
   });
+
+  it("a new ticket already in progress on the tracker is listed, not queued", () => {
+    const tickets = book().make();
+    tickets.observe("p", [], { baseline: true });
+    const result = tickets.observe("p", [{ ...task("SHOP-3"), status: "Ready for QA", stage: "started" }], { baseline: false });
+    expect(result.queued).toEqual([]);
+    expect(tickets.get("p", "SHOP-3")).toEqual(expect.objectContaining({ state: "not-started", status: "Ready for QA", stage: "started" }));
+  });
+
+  it("a queued ticket that moves on in the tracker leaves the queue", () => {
+    const tickets = book().make();
+    tickets.observe("p", [{ ...task("SHOP-4"), stage: "todo" }], { baseline: false });
+    tickets.observe("p", [{ ...task("SHOP-4"), status: "Code Review", stage: "started" }], { baseline: false });
+    expect(tickets.get("p", "SHOP-4")).toEqual(expect.objectContaining({ state: "not-started", status: "Code Review" }));
+  });
+
+  it("a ticket finished in the tracker is dropped wherever it waits", () => {
+    const tickets = book().make();
+    tickets.observe("p", [{ ...task("SHOP-5"), stage: "todo" }], { baseline: false });
+    tickets.observe("p", [{ ...task("SHOP-5"), status: "Done", stage: "done" }], { baseline: false });
+    expect(tickets.get("p", "SHOP-5").state).toBe("dropped");
+  });
+
+  it("a ticket another project already has is listed here, not queued twice", () => {
+    const tickets = book().make();
+    const result = tickets.observe("p", [task("SHOP-6")], { baseline: false, heldElsewhere: (key: string) => (key === "SHOP-6" ? "admin" : null) });
+    expect(result.queued).toEqual([]);
+    expect(tickets.get("p", "SHOP-6")).toEqual(expect.objectContaining({ state: "not-started", elsewhere: "admin" }));
+  });
+
+  it("a ticket the owner queued by hand stays queued while it is in progress", () => {
+    const tickets = book().make();
+    tickets.observe("p", [{ ...task("SHOP-7"), stage: "started" }], { baseline: false });
+    tickets.set("p", "SHOP-7", { state: "queued", chosen: true });
+    tickets.observe("p", [{ ...task("SHOP-7"), stage: "started" }], { baseline: false });
+    expect(tickets.get("p", "SHOP-7").state).toBe("queued");
+  });
 });

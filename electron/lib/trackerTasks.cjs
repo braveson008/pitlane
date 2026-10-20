@@ -32,6 +32,7 @@
 
 /** Fields kept from whatever the tracker returns. Everything else is dropped. */
 const TASK_FIELDS = ["id", "title", "description", "url", "status", "group", "updatedAt"];
+const STAGES = ["todo", "started", "done"];
 
 /**
  * What to ask the tracker's MCP server.
@@ -85,7 +86,13 @@ function buildListTasksPrompt({ source, query = "", scope = "", limit = 25, brie
     `- Return at most ${boundedLimit} items.`,
     "",
     "Reply with one JSON object and nothing else:",
-    '{"tasks":[{"id":"human-readable key","title":"...","description":"...","url":"...","status":"...","group":"...","updatedAt":"ISO 8601"}]}',
+    '{"tasks":[{"id":"human-readable key","title":"...","description":"...","url":"...","status":"...","stage":"todo | started | done","group":"...","updatedAt":"ISO 8601"}]}',
+    "",
+    // "Ready for QA" reads as open, but its development is finished; only the tracker's own category tells work not yet begun from work past it.
+    "The stage comes from the tracker's own status category, never from the status name:",
+    'Jira\'s To Do category or Linear\'s backlog, triage and unstarted types are "todo";',
+    'Jira\'s In Progress category or Linear\'s started type are "started", including review and QA states;',
+    'Jira\'s Done category or Linear\'s completed and canceled types are "done".',
     "",
     // A summarised description is a different document from the ticket. Someone
     // reading it in Pitlane is reading it to do the work, and a paraphrase of
@@ -202,6 +209,7 @@ function parsePickedTask(raw) {
       : clean(parsed[field], limit);
     if (value) task[field] = value;
   }
+  if (STAGES.includes(parsed.stage)) task.stage = parsed.stage;
   return { ok: true, task };
 }
 

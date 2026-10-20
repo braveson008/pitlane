@@ -6,7 +6,9 @@ function createWindowManager({ create, store }) {
 
   const record = () => { if (!quitting) store.set([...open.keys()]); };
 
-  function openProject(id) {
+  function openProject(id, { from } = {}) {
+    // The picker has done its job once it opens a project; left open, it hides behind the project and catches ⌘N.
+    if (from && from === picker) from.close();
     const existing = open.get(id);
     if (existing) {
       existing.focus();

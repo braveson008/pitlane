@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { INTERVALS, MODELS, watchSource, watchTitle } from "./watches";
+import { INTERVALS, MODELS, overlapNote, watchSource, watchTitle } from "./watches";
 
 describe("watch labels", () => {
   it("say what each watch looks for, in words", () => {
@@ -16,5 +16,10 @@ describe("watch labels", () => {
   it("offer the same choices main accepts", () => {
     expect(INTERVALS).toEqual([300, 600, 1800, 3600]);
     expect(MODELS).toEqual(["sonnet", "haiku", "opus"]);
+  });
+
+  it("say which projects get the same tickets and what fixes it", () => {
+    expect(overlapNote(["admin"])).toBe("admin gets these same tickets · set only from to this project's Jira key or Linear team");
+    expect(overlapNote(["a", "b"])).toMatch(/^a and b get these same tickets/);
   });
 });

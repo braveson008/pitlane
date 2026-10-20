@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { api, type Project, type Watch, type WatchKind } from "../api";
 import { ago } from "../lib/sessionOrder";
-import { INTERVALS, MODELS, watchTitle, watchSource } from "../lib/watches";
+import { INTERVALS, MODELS, overlapNote, watchTitle, watchSource } from "../lib/watches";
 
 interface WatchesProps {
   project: Project;
@@ -11,6 +11,18 @@ interface WatchesProps {
 
 type Field = "server" | "scope" | "interval" | "model";
 type Choice = { kind: WatchKind; server?: string };
+
+/** For each of the project's watches, the other projects whose watch gets the same tickets. */
+export function useOverlaps(project: Project) {
+  const [overlaps, setOverlaps] = useState<Record<string, string[]>>({});
+  useEffect(() => {
+    const load = () => void api().watches.overlaps(project.id).then(setOverlaps);
+    load();
+    const timer = setInterval(load, 30_000);
+    return () => clearInterval(timer);
+  }, [project]);
+  return overlaps;
+}
 
 /** Every watch of the project, and everything about each one the owner can change. */
 export function Watches({ project, onProject, onBack }: WatchesProps) {
@@ -23,6 +35,7 @@ export function Watches({ project, onProject, onBack }: WatchesProps) {
   const [removing, setRemoving] = useState<string | null>(null);
   const [error, setError] = useState("");
   const [now, setNow] = useState(Date.now());
+  const overlapping = useOverlaps(project);
   const current: Watch | undefined = watches[Math.min(at, watches.length - 1)];
 
   useEffect(() => { void api().watches.servers(project.id).then(setServers); }, [project.id]);
@@ -153,6 +166,7 @@ export function Watches({ project, onProject, onBack }: WatchesProps) {
             </button>
           ))}</div>
           {current?.lastError ? <p className="need">  {current.lastError}</p> : null}
+          {current && overlapping[current.id] ? <p className="need">  {overlapNote(overlapping[current.id])} · e to edit</p> : null}
           {removing && removing === current?.id ? <p className="need">  remove this watch? x again — what it found stays on the home screen</p> : null}
         </section>
 

@@ -14,3 +14,8 @@ export function watchSource(watch: { kind: WatchKind | string; server?: string }
   if (watch.kind === "review-requested") return project.github?.kind === "gitlab" ? "glab" : "gh";
   return watch.server ?? "no server";
 }
+
+export function overlapNote(names: string[]) {
+  const who = names.length > 1 ? `${names.slice(0, -1).join(", ")} and ${names.at(-1)} get` : `${names[0]} gets`;
+  return `${who} these same tickets · set only from to this project's Jira key or Linear team`;
+}

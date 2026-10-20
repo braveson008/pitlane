@@ -65,12 +65,17 @@ try {
   await page.keyboard.press("Escape");
   await page.getByLabel("Sessions").waitFor();
   const notStarted = page.getByLabel("Not started");
-  await until("SHOP-1 baselined", async () => (await notStarted.count()) > 0 && /1 assigned before the watch began/.test(await notStarted.innerText()), 20000);
+  await until("SHOP-1 baselined", async () => (await notStarted.count()) > 0 && /1 already under way, assigned before the watch began/.test(await notStarted.innerText()), 20000);
   assert.doesNotMatch(await notStarted.innerText(), /SHOP-1/, "not-started tickets are folded away until asked for");
   console.log("PASS a watch is added, scoped and timed on its own screen; tickets already assigned are folded under not started");
 
-  await writeFile(ticketsFile, JSON.stringify([ticket("SHOP-1", "First thing"), ticket("SHOP-2", "Second thing")]));
+  // Assigned after the watch began but already past development: listed with its status, never up next.
+  await writeFile(ticketsFile, JSON.stringify([ticket("SHOP-1", "First thing"), { ...ticket("SHOP-9", "Already in QA"), status: "Ready for QA", stage: "started" }]));
+  await until("SHOP-9 listed", async () => /2 already under way/.test(await notStarted.innerText()), 20000);
+  assert.equal(await page.getByLabel("Up next").count(), 0, "a ticket under way in the tracker is not queued");
+  await writeFile(ticketsFile, JSON.stringify([ticket("SHOP-1", "First thing"), ticket("SHOP-2", "Second thing"), { ...ticket("SHOP-9", "Already in QA"), status: "Ready for QA", stage: "started" }]));
   const sessions = page.getByLabel("Sessions");
+  console.log("PASS a ticket already under way in the tracker is listed under not started, not queued");
   await until("SHOP-2 started", async () => /SHOP-2[\s\S]*running/.test(await sessions.innerText()), 30000);
   await sessions.getByRole("button", { name: /SHOP-2/ }).click();
   await until("the lead prompt", async () => /prompt: Work on SHOP-2\./.test(await terminalText(page)));

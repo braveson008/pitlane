@@ -42,6 +42,7 @@ contextBridge.exposeInMainWorld("pitlane", {
     remove: (id, watchId) => ipcRenderer.invoke("watches:remove", { id, watchId }),
     toggle: (id, watchId) => ipcRenderer.invoke("watches:toggle", { id, watchId }),
     check: (id, watchId) => ipcRenderer.invoke("watches:check", { id, watchId }),
+    overlaps: (id) => ipcRenderer.invoke("watches:overlaps", { id }),
   },
   reviews: {
     update: (projectId, key, draft) => ipcRenderer.invoke("reviews:update", { projectId, key, draft }),

@@ -89,4 +89,11 @@ describe("dispatcher", () => {
     await dispatcher.tick();
     expect(started).toEqual(["b:review:9", "a:A-2", "a:A-1"]);
   });
+
+  it("a ticket the tracker shows as already under way is set aside, not started", async () => {
+    const { book, dispatcher } = setup({ start: async () => ({ ok: false, setAside: { state: "not-started", status: "Ready for QA", stage: "started" } }) });
+    book.observe("a", [task("A-1")], { baseline: false });
+    expect(await dispatcher.tick()).toEqual([]);
+    expect(book.get("a", "A-1")).toMatchObject({ state: "not-started", status: "Ready for QA" });
+  });
 });

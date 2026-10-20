@@ -41,7 +41,7 @@ const projectWindow = (app) => until("the project window", async () => app.windo
 
 const app = await electron.launch({ args: [root], cwd: root, env });
 try {
-  const picker = await app.firstWindow();
+  let picker = await app.firstWindow();
   await picker.waitForLoadState("domcontentloaded");
   assert.equal(await picker.title(), "Pitlane");
   await picker.getByText("Open folder…").waitFor({ timeout: 15000 });
@@ -54,10 +54,11 @@ try {
   const id = new URL(project.url()).searchParams.get("project");
   // This smoke runs two agents at once; milestone 2 gives each its own workspace.
   await project.evaluate((projectId) => window.pitlane.projects.update(projectId, { agentLimit: 3 }), id);
-  console.log("PASS opening a folder opens that project's window");
+  console.log("PASS opening a folder opens that project's window, and the picker closes");
 
+  await until("the picker closed", async () => picker.isClosed());
   const count = app.windows().length;
-  await picker.evaluate((projectId) => window.pitlane.projects.open(projectId), id);
+  await project.evaluate((projectId) => window.pitlane.projects.open(projectId), id);
   await new Promise((resolve) => setTimeout(resolve, 500));
   assert.equal(app.windows().length, count, "the same project never opens twice");
   console.log("PASS opening the same project again focuses its window");
@@ -152,6 +153,9 @@ try {
   console.log("PASS ⌥⌘← moves to the neighbouring session");
 
   await project.close();
+  await app.evaluate(({ Menu }) => Menu.getApplicationMenu().items.find((item) => item.label === "File").submenu.items.find((item) => item.label === "Open Project…").click());
+  picker = await until("the picker from File → Open Project…", async () => app.windows().find((page) => !page.isClosed() && !page.url().includes("project=")));
+  await picker.getByRole("button", { name: /shop/ }).waitFor();
   await assertNothingCut(picker, "picker with a project");
   await picker.getByRole("button", { name: /shop/ }).click();
   project = await projectWindow(app);

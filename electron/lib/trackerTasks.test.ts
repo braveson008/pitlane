@@ -250,4 +250,19 @@ describe("describePickedTask", () => {
       "Your latest Jira item is Fix the parser.",
     );
   });
+
+  it("keeps a task's stage only when it is one Pitlane knows", () => {
+    const parsed = parseTaskList(JSON.stringify({ tasks: [
+      { id: "A-1", title: "One", status: "Ready for QA", stage: "started" },
+      { id: "A-2", title: "Two", stage: "In Progress" },
+    ] }));
+    expect(parsed.tasks[0].stage).toBe("started");
+    expect(parsed.tasks[1].stage).toBeUndefined();
+  });
+
+  it("asks for the tracker's own status category", () => {
+    const prompt = buildListTasksPrompt({ source: "atlassian" });
+    expect(prompt).toContain('"stage"');
+    expect(prompt).toMatch(/status category/);
+  });
 });

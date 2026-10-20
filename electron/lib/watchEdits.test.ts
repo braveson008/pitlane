@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 // eslint-disable-next-line @typescript-eslint/no-var-requires
-const { addWatch, editWatch, removeWatch, withIds, INTERVALS, MODELS } = require("./watchEdits.cjs");
+const { addWatch, editWatch, removeWatch, withIds, overlaps, INTERVALS, MODELS } = require("./watchEdits.cjs");
 
 const servers = ["atlassian", "linear-work"];
 
@@ -56,5 +56,17 @@ describe("editing watches", () => {
   it("offers the intervals and models the editor cycles through", () => {
     expect(INTERVALS).toEqual([300, 600, 1800, 3600]);
     expect(MODELS).toEqual(["sonnet", "haiku", "opus"]);
+  });
+
+  it("names the other projects that get the same tickets", () => {
+    const watch = (id: string, scope?: string, enabled = true) => ({ id, kind: "ticket-assigned", server: "atlassian", intervalSeconds: 300, model: "sonnet", enabled, ...(scope ? { scope } : {}) });
+    const projects = [
+      { id: "fe", name: "frontend", watches: [watch("w-fe")] },
+      { id: "bo", name: "admin", watches: [watch("w-bo")] },
+      { id: "api", name: "api", watches: [watch("w-api", "API")] },
+      { id: "old", name: "old", watches: [watch("w-old", undefined, false)] },
+    ];
+    expect(overlaps(projects, "fe")).toEqual({ "w-fe": ["admin"] });
+    expect(overlaps(projects, "api")).toEqual({});
   });
 });

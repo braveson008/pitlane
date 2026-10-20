@@ -70,4 +70,13 @@ describe("window manager", () => {
     f.windows[0].close();
     expect(f.saved()).toEqual(["a"]);
   });
+
+  it("the picker closes once it has opened a project", () => {
+    const fake = fakes();
+    const manager = createWindowManager({ create: fake.create, store: fake.store });
+    const picker = manager.openPicker();
+    manager.openProject("a", { from: picker });
+    manager.openPicker();
+    expect(fake.created).toEqual([null, "a", null]);
+  });
 });

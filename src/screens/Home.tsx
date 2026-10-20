@@ -5,8 +5,9 @@ import { UpdateNote, useUpdateState } from "./UpdateNote";
 import { ago, orderSessions, sessionMarker, stateLabel } from "../lib/sessionOrder";
 import { homeKey } from "../lib/keys";
 import { nextTheme, THEME_LABEL, THEME_ORDER, type ThemeId } from "../theme/themes";
-import { notStarted, upNext } from "../lib/queue";
-import { watchSource, watchTitle } from "../lib/watches";
+import { notStarted, ticketLabel, upNext } from "../lib/queue";
+import { overlapNote, watchSource, watchTitle } from "../lib/watches";
+import { useOverlaps } from "./Watches";
 
 const AGENT_CHOICES: AgentId[] = ["claude", "codex"];
 
@@ -40,6 +41,7 @@ export function Home({ project, theme, sessions, workspaces, tickets, pausedUnti
   const ordered = useMemo(() => orderSessions(sessions, now), [sessions, now]);
   const update = useUpdateState();
   const watches = project.watches ?? [];
+  const overlapping = useOverlaps(project);
   const waiting = tickets.filter((ticket) => ticket.state === "needs-you" || ticket.state === "review-ready");
   const next = upNext(tickets);
   const assigned = notStarted(tickets);
@@ -263,7 +265,7 @@ export function Home({ project, theme, sessions, workspaces, tickets, pausedUnti
               <button key={ticket.key} type="button" className={`row${isSelected((row) => row.kind === "ticket" && row.ticket.key === ticket.key) ? " sel" : ""}`} onClick={() => startTicket(ticket)} title={ticket.url}>
                 <span className="hi">{index + 1}</span>
                 <span><span className="id">{ticket.key}</span> {ticket.title}</span>
-                <span className="lo">{ticket.priority === "review" ? "review" : ticket.priority === "feedback" ? "feedback" : "ticket"}</span>
+                <span className="lo">{ticketLabel(ticket)}</span>
                 <span className="lo">{isSelected((row) => row.kind === "ticket" && row.ticket.key === ticket.key) ? "x take out" : ""}</span>
                 <span className="lo right">{ago(ticket.firstSeenAt, now)}</span>
               </button>
@@ -277,7 +279,7 @@ export function Home({ project, theme, sessions, workspaces, tickets, pausedUnti
             <div className="rows">
               <button type="button" className={`row${isSelected((row) => row.kind === "assigned") ? " sel" : ""}`} onClick={() => setShowAssigned((shown) => !shown)}>
                 <span className="lo">{showAssigned ? "▾" : "▸"}</span>
-                <span className="lo">{assigned.length} assigned before the watch began, or from outside the team · Pitlane won't start these by itself</span>
+                <span className="lo">{assigned.length} already under way, assigned before the watch began, in another project, or from outside the team · Pitlane won't start these by itself</span>
                 <span className="lo">{showAssigned ? "a hide" : "a show"}</span>
                 <span /><span />
               </button>
@@ -285,7 +287,7 @@ export function Home({ project, theme, sessions, workspaces, tickets, pausedUnti
                 <button key={ticket.key} type="button" className={`row${isSelected((row) => row.kind === "ticket" && row.ticket.key === ticket.key) ? " sel" : ""}`} onClick={() => startTicket(ticket)} title={ticket.url}>
                   <span className="lo">·</span>
                   <span><span className="id">{ticket.key}</span> {ticket.title}</span>
-                  <span className="lo">{ticket.key.startsWith("review:") ? "review" : "ticket"}</span>
+                  <span className="lo">{ticketLabel(ticket)}</span>
                   <span className="lo">enter up next</span>
                   <span className="lo right">{ago(ticket.firstSeenAt, now)}</span>
                 </button>
@@ -325,6 +327,7 @@ export function Home({ project, theme, sessions, workspaces, tickets, pausedUnti
             <p className="lo">No watches yet · w to add one</p>
           )}
           {watches.some((watch) => watch.lastError) ? <p className="need">  {watches.find((watch) => watch.lastError)?.lastError}</p> : null}
+          {watches.some((watch) => overlapping[watch.id]) ? <p className="need">  {overlapNote(overlapping[watches.find((watch) => overlapping[watch.id])!.id])} · w to set it</p> : null}
         </section>
 
         {help ? (
@@ -344,6 +347,7 @@ export function Home({ project, theme, sessions, workspaces, tickets, pausedUnti
             <p><span className="hi">L</span> <span className="lo">agents at once in this project (1–3)</span></p>
             <p><span className="hi">j k ↑ ↓</span> <span className="lo">move</span></p>
             <p><span className="hi">⌘K</span> <span className="lo">switch session · inside a session ⌘↑ comes back here</span></p>
+            <p><span className="hi">⌘N</span> <span className="lo">open another project in its own window · or right-click Pitlane in the Dock</span></p>
           </section>
         ) : null}
       </div>

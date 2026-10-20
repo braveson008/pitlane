@@ -42,7 +42,7 @@ Everything about a project is on one screen, top to bottom:
 1. **Needs you** (marked `!`): a ticket whose agent asked a question or stopped without a PR, and review drafts waiting for your approval. These are always at the top.
 2. **Sessions**: every agent session, running first. Each row shows the ticket (if any), the agent, its state and its age. The line above says how many workspaces are in use, and how many sessions have ended (`C` clears those).
 3. **Up next**: tickets and reviews that will start by themselves, numbered in the order they will start. The line above says whether one is starting now or waiting for a workspace.
-4. **Not started**: tickets that were already assigned to you when you switched a watch on, plus review requests from people outside the repository's team. Pitlane never starts these by itself. They are folded into one line until you press `a`.
+4. **Not started**: tickets that were already assigned to you when you switched a watch on, tickets already under way in the tracker (in progress, in review, in QA), tickets another project has already taken, plus review requests from people outside the repository's team. Each row shows the ticket's own tracker status. Pitlane never starts these by itself. They are folded into one line until you press `a`.
 5. **In review**: tickets whose pull request is open, with a link to it (`p` opens it).
 6. **Watches**: a summary of what Pitlane is watching. `w` opens the watch editor.
 
@@ -110,11 +110,11 @@ On the watches screen:
 When editing (`↑↓` moves between fields, `←→` changes one):
 
 - **tracker**: which Jira or Linear server to read, if Claude has more than one.
-- **only from**: narrow the watch to one Jira project, Linear team or site, such as `SHOP project`. Useful when one account reaches several companies' work.
+- **only from**: narrow the watch to one Jira project, Linear team or site, such as `SHOP project`. Needed whenever two projects watch the same tracker: without it, each gets every ticket assigned to you. Pitlane warns on both screens when two projects' watches would get the same tickets, and never lets two projects start the same ticket.
 - **checks**: every 5, 10, 30 or 60 minutes.
 - **model**: Sonnet, Haiku or Opus for reading the tracker.
 
-**The first check only takes note.** When a watch is switched on for the first time, or after you change its tracker or scope, whatever is already assigned to you goes under *Not started* instead of starting: switching a watch on never starts ten agents at once. From then on, a ticket newly assigned to you goes to *Up next* and starts when a workspace is free. Press `a` on the home screen to see the not-started tickets, and `enter` on one to put it up next. `x` on an Up next ticket takes it back out.
+**The first check only takes note.** When a watch is switched on for the first time, or after you change its tracker or scope, whatever is already assigned to you goes under *Not started* instead of starting: switching a watch on never starts ten agents at once. From then on, a ticket newly assigned to you goes to *Up next* and starts when a workspace is free, but only if the tracker files it under To Do (Jira's status category, Linear's backlog or unstarted). A ticket already in progress, in review or in QA is listed under *Not started*, and one that moves on while it waits leaves Up next by itself; one that is done drops off. Press `a` on the home screen to see the not-started tickets, and `enter` on one to put it up next. `x` on an Up next ticket takes it back out.
 
 ## 6. How a ticket gets done
 
