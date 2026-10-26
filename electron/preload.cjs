@@ -6,6 +6,13 @@ contextBridge.exposeInMainWorld("pitlane", {
     list: () => ipcRenderer.invoke("projects:list"),
     add: (path) => ipcRenderer.invoke("projects:add", { path }),
     open: (id) => ipcRenderer.invoke("projects:open", { id }),
+    switch: (id) => ipcRenderer.invoke("projects:switch", { id }),
+    attention: () => ipcRenderer.invoke("projects:attention"),
+    onAttention: (handler) => {
+      const listener = (_event, payload) => handler(payload);
+      ipcRenderer.on("projects:attention", listener);
+      return () => ipcRenderer.removeListener("projects:attention", listener);
+    },
     status: (id) => ipcRenderer.invoke("projects:status", { id }),
     locate: (id) => ipcRenderer.invoke("projects:locate", { id }),
     chooseFolder: () => ipcRenderer.invoke("projects:choose-folder"),
@@ -37,11 +44,12 @@ contextBridge.exposeInMainWorld("pitlane", {
   },
   watches: {
     servers: (id) => ipcRenderer.invoke("watches:servers", { id }),
-    create: (id, kind, server) => ipcRenderer.invoke("watches:create", { id, kind, server }),
+    create: (id, kind, server, instructions) => ipcRenderer.invoke("watches:create", { id, kind, server, instructions }),
     edit: (id, watchId, patch) => ipcRenderer.invoke("watches:edit", { id, watchId, patch }),
     remove: (id, watchId) => ipcRenderer.invoke("watches:remove", { id, watchId }),
     toggle: (id, watchId) => ipcRenderer.invoke("watches:toggle", { id, watchId }),
     check: (id, watchId) => ipcRenderer.invoke("watches:check", { id, watchId }),
+    checkAll: (id) => ipcRenderer.invoke("watches:check", { id }),
     overlaps: (id) => ipcRenderer.invoke("watches:overlaps", { id }),
     suggestScope: (id) => ipcRenderer.invoke("watches:suggest-scope", { id }),
   },
@@ -54,6 +62,8 @@ contextBridge.exposeInMainWorld("pitlane", {
     list: (projectId) => ipcRenderer.invoke("tickets:list", { projectId }),
     start: (projectId, key) => ipcRenderer.invoke("tickets:start", { projectId, key }),
     unqueue: (projectId, key) => ipcRenderer.invoke("tickets:unqueue", { projectId, key }),
+    approvePlan: (projectId, key) => ipcRenderer.invoke("tickets:approve-plan", { projectId, key }),
+    discardPlan: (projectId, key) => ipcRenderer.invoke("tickets:discard-plan", { projectId, key }),
     onChanged: (handler) => {
       const listener = (_event, payload) => handler(payload);
       ipcRenderer.on("tickets:changed", listener);
@@ -85,6 +95,7 @@ contextBridge.exposeInMainWorld("pitlane", {
     resize: (id, cols, rows) => ipcRenderer.invoke("sessions:resize", { id, cols, rows }),
     stop: (id) => ipcRenderer.invoke("sessions:stop", { id }),
     clearEnded: (projectId) => ipcRenderer.invoke("sessions:clear-ended", { projectId }),
+    delete: (id) => ipcRenderer.invoke("sessions:delete", { id }),
     attach: (id) => ipcRenderer.invoke("sessions:attach", { id }),
     detach: (id) => ipcRenderer.invoke("sessions:detach", { id }),
     pasteFiles: (id, files) => ipcRenderer.invoke("sessions:paste-paths", { id, paths: Array.from(files, (file) => webUtils.getPathForFile(file)) }),

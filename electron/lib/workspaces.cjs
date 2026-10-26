@@ -3,8 +3,8 @@ const path = require("node:path");
 const { runGit } = require("./git.cjs");
 const { prepareDependencies } = require("./dependencies.cjs");
 
-// A fixed set of reusable checkouts per project: a session switches a free one to its branch instead of
-// making a new copy of the project, so disk use is bounded by the agent limit, never by the number of tickets.
+// Reusable checkouts per project: a session switches a free one to its branch instead of making a new copy.
+// One clean slot is kept warm for the next session; any other is removed once its session lets it go.
 function createWorkspacePool({ root, git = runGit, store, prepare = prepareDependencies, log = () => {} }) {
   let all = store.get() || {};
   const save = () => store.set(all);
@@ -72,16 +72,26 @@ function createWorkspacePool({ root, git = runGit, store, prepare = prepareDepen
   }
 
   async function pick(project) {
-    const limit = project.agentLimit || 1;
-    const busy = `All ${limit} ${limit === 1 ? "workspace is" : "workspaces are"} busy`;
-    // The limit is agents at once, so it counts slots in use, however many have been made.
-    if (slotsOf(project).filter((candidate) => candidate.state !== "free").length >= limit) throw new Error(busy);
     const free = slotsOf(project).find((candidate) => candidate.state === "free");
     if (free) return free;
     const used = new Set(slotsOf(project).map((candidate) => candidate.index));
-    const index = [1, 2, 3].find((candidate) => !used.has(candidate));
-    if (!index) throw new Error(busy);
+    let index = 1;
+    while (used.has(index)) index += 1;
     return createSlot(project, index);
+  }
+
+  /** Removes every free slot but the first from disk, so finished sessions leave nothing behind. */
+  async function trim(project) {
+    const spare = slotsOf(project).filter((slot) => slot.state === "free").slice(1);
+    for (const slot of spare) {
+      await git(project.path, ["worktree", "remove", "--force", slot.path]).catch(() => {});
+      fs.rmSync(slot.path, { recursive: true, force: true });
+      all[project.id] = slotsOf(project).filter((candidate) => candidate !== slot);
+    }
+    if (spare.length) {
+      await git(project.path, ["worktree", "prune"]).catch(() => {});
+      save();
+    }
   }
 
   async function claim(project, slot, { sessionId, branch, detached = false }) {
@@ -161,6 +171,7 @@ function createWorkspacePool({ root, git = runGit, store, prepare = prepareDepen
           return "held";
         }
         await reset(project, slot);
+        await trim(project);
         return "reset";
       });
     },
@@ -170,6 +181,16 @@ function createWorkspacePool({ root, git = runGit, store, prepare = prepareDepen
         if (slot.state === "busy") throw new Error("That workspace is still in use by its agent");
         if (await git(slot.path, ["status", "--porcelain"])) await commitAll(slot, "WIP: parked by Pitlane");
         await reset(project, slot);
+        await trim(project);
+      });
+    },
+    /** Throws away whatever an ended session's slot kept, uncommitted or not, and frees it. */
+    discard(project, index, sessionId) {
+      return serial(project.id, async () => {
+        const slot = find(project, index, sessionId);
+        if (slot.state === "busy") throw new Error("That workspace is still in use by its agent");
+        await reset(project, slot);
+        await trim(project);
       });
     },
     /** Commits the owner's revert in a held slot (pushing only to the branch's own remote branch), then releases it. */

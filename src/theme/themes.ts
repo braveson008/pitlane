@@ -2,17 +2,22 @@ import type { ITheme } from "@xterm/xterm";
 import type { ThemeId } from "../api";
 
 export type { ThemeId };
-export const THEME_ORDER: ThemeId[] = ["vt220", "acme", "night-city", "green-screen", "daylight", "synthwave", "midnight"];
+export const THEME_ORDER: ThemeId[] = ["github-dark", "nord", "one-dark", "dracula", "tokyo-night"];
 export const THEME_LABEL: Record<ThemeId, string> = {
-  vt220: "VT220", acme: "Acme", "night-city": "Night City", "green-screen": "Green Screen", daylight: "Daylight", synthwave: "Synthwave", midnight: "Midnight",
+  "github-dark": "GitHub Dark", nord: "Nord", "one-dark": "Atom One Dark", dracula: "Dracula", "tokyo-night": "Tokyo Night",
 };
 
 export function nextTheme(id: ThemeId): ThemeId {
   return THEME_ORDER[(THEME_ORDER.indexOf(id) + 1) % THEME_ORDER.length];
 }
 
+const known = (id?: string): id is ThemeId => THEME_ORDER.includes(id as ThemeId);
+
+// Projects and settings saved by an earlier version can name a theme that has since gone.
 export function themeFor(project?: { theme?: ThemeId }, settings?: { defaultTheme?: ThemeId }): ThemeId {
-  return project?.theme ?? settings?.defaultTheme ?? "vt220";
+  if (known(project?.theme)) return project.theme;
+  if (known(settings?.defaultTheme)) return settings.defaultTheme;
+  return "github-dark";
 }
 
 type Palette = Required<Pick<ITheme,
@@ -22,41 +27,30 @@ type Palette = Required<Pick<ITheme,
 
 // Agent CLIs colour their own output, so each theme maps all 16 ANSI colours into its own palette.
 const PALETTES: Record<ThemeId, Palette> = {
-  vt220: {
-    background: "#0a0a08", foreground: "#e8a33c", cursor: "#ffd38a", cursorAccent: "#0a0a08", selectionBackground: "#3a2a0e",
-    black: "#0a0a08", red: "#ff6b4a", green: "#9be37a", yellow: "#ffb000", blue: "#8fb3ff", magenta: "#d7a6ff", cyan: "#6fd3e8", white: "#e8a33c",
-    brightBlack: "#7d5c26", brightRed: "#ff8f73", brightGreen: "#b9f09d", brightYellow: "#ffd38a", brightBlue: "#b3cbff", brightMagenta: "#e6c4ff", brightCyan: "#9ce4f2", brightWhite: "#fff1d6",
+  "github-dark": {
+    background: "#0d1117", foreground: "#c9d1d9", cursor: "#58a6ff", cursorAccent: "#0d1117", selectionBackground: "rgba(56,139,253,.35)",
+    black: "#484f58", red: "#ff7b72", green: "#3fb950", yellow: "#d29922", blue: "#58a6ff", magenta: "#bc8cff", cyan: "#39c5cf", white: "#b1bac4",
+    brightBlack: "#6e7681", brightRed: "#ffa198", brightGreen: "#56d364", brightYellow: "#e3b341", brightBlue: "#79c0ff", brightMagenta: "#d2a8ff", brightCyan: "#56d4dd", brightWhite: "#f0f6fc",
   },
-  acme: {
-    background: "#ffffea", foreground: "#1a1a1a", cursor: "#1a1a1a", cursorAccent: "#ffffea", selectionBackground: "#eeee9e",
-    // White and bright white would vanish on paper, so they become greys.
-    black: "#1a1a1a", red: "#b0261c", green: "#2c7a33", yellow: "#8a6d00", blue: "#1d3fa0", magenta: "#7a2e8f", cyan: "#0f6e7a", white: "#8a8a7a",
-    brightBlack: "#8a8a7a", brightRed: "#d0372b", brightGreen: "#3a9442", brightYellow: "#a68400", brightBlue: "#2f55c4", brightMagenta: "#9440ab", brightCyan: "#168896", brightWhite: "#5a5a50",
+  nord: {
+    background: "#2e3440", foreground: "#d8dee9", cursor: "#d8dee9", cursorAccent: "#2e3440", selectionBackground: "#434c5e",
+    black: "#3b4252", red: "#bf616a", green: "#a3be8c", yellow: "#ebcb8b", blue: "#81a1c1", magenta: "#b48ead", cyan: "#88c0d0", white: "#e5e9f0",
+    brightBlack: "#616e88", brightRed: "#bf616a", brightGreen: "#a3be8c", brightYellow: "#ebcb8b", brightBlue: "#81a1c1", brightMagenta: "#b48ead", brightCyan: "#8fbcbb", brightWhite: "#eceff4",
   },
-  "night-city": {
-    background: "#07080b", foreground: "#d9f9ff", cursor: "#fcee0a", cursorAccent: "#07080b", selectionBackground: "rgba(5,217,232,.14)",
-    black: "#07080b", red: "#ff2a6d", green: "#3cf2a0", yellow: "#fcee0a", blue: "#3d8bff", magenta: "#c86bff", cyan: "#05d9e8", white: "#d9f9ff",
-    brightBlack: "#4a5560", brightRed: "#ff5c8f", brightGreen: "#7affc4", brightYellow: "#fff35c", brightBlue: "#70a9ff", brightMagenta: "#dc9bff", brightCyan: "#5ceaf4", brightWhite: "#ffffff",
+  "one-dark": {
+    background: "#282c34", foreground: "#abb2bf", cursor: "#528bff", cursorAccent: "#282c34", selectionBackground: "#3e4451",
+    black: "#3f4451", red: "#e06c75", green: "#98c379", yellow: "#e5c07b", blue: "#61afef", magenta: "#c678dd", cyan: "#56b6c2", white: "#d7dae0",
+    brightBlack: "#5c6370", brightRed: "#ff7b86", brightGreen: "#b1e18b", brightYellow: "#efd08b", brightBlue: "#67cdff", brightMagenta: "#e48bff", brightCyan: "#63d4e0", brightWhite: "#ffffff",
   },
-  "green-screen": {
-    background: "#040a05", foreground: "#4af07a", cursor: "#b6ffc8", cursorAccent: "#040a05", selectionBackground: "#0f2a16",
-    black: "#040a05", red: "#ff7a59", green: "#4af07a", yellow: "#d8f56a", blue: "#6fb8ff", magenta: "#c49bff", cyan: "#7fe8e0", white: "#4af07a",
-    brightBlack: "#1f6b33", brightRed: "#ff9c82", brightGreen: "#8dffaa", brightYellow: "#ecff9a", brightBlue: "#9fd0ff", brightMagenta: "#dcc0ff", brightCyan: "#aef5ef", brightWhite: "#d9ffe2",
+  dracula: {
+    background: "#282a36", foreground: "#f8f8f2", cursor: "#f8f8f2", cursorAccent: "#282a36", selectionBackground: "#44475a",
+    black: "#21222c", red: "#ff5555", green: "#50fa7b", yellow: "#f1fa8c", blue: "#bd93f9", magenta: "#ff79c6", cyan: "#8be9fd", white: "#f8f8f2",
+    brightBlack: "#6272a4", brightRed: "#ff6e6e", brightGreen: "#69ff94", brightYellow: "#ffffa5", brightBlue: "#d6acff", brightMagenta: "#ff92df", brightCyan: "#a4ffff", brightWhite: "#ffffff",
   },
-  daylight: {
-    background: "#fafafa", foreground: "#24292f", cursor: "#24292f", cursorAccent: "#fafafa", selectionBackground: "#dbe7f7",
-    black: "#24292f", red: "#cf222e", green: "#1a7f37", yellow: "#9a6700", blue: "#0969da", magenta: "#8250df", cyan: "#1b7c83", white: "#6e7781",
-    brightBlack: "#8c959f", brightRed: "#e0444f", brightGreen: "#2a9d4b", brightYellow: "#bf8700", brightBlue: "#218bff", brightMagenta: "#a475f9", brightCyan: "#3192aa", brightWhite: "#57606a",
-  },
-  synthwave: {
-    background: "#1a1033", foreground: "#f3e8ff", cursor: "#ff7edb", cursorAccent: "#1a1033", selectionBackground: "rgba(255,126,219,.18)",
-    black: "#1a1033", red: "#fe4450", green: "#72f1b8", yellow: "#fede5d", blue: "#6d77ff", magenta: "#ff7edb", cyan: "#36f9f6", white: "#f3e8ff",
-    brightBlack: "#7a6a9e", brightRed: "#ff6b74", brightGreen: "#9cf7cf", brightYellow: "#ffe98a", brightBlue: "#959cff", brightMagenta: "#ffa5e6", brightCyan: "#7cfbf9", brightWhite: "#ffffff",
-  },
-  midnight: {
-    background: "#0e1320", foreground: "#c9d4e5", cursor: "#e8eef8", cursorAccent: "#0e1320", selectionBackground: "#1f2a47",
-    black: "#0e1320", red: "#f7768e", green: "#9ece6a", yellow: "#e0af68", blue: "#7aa2f7", magenta: "#bb9af7", cyan: "#7dcfff", white: "#c9d4e5",
-    brightBlack: "#56637d", brightRed: "#ff94a8", brightGreen: "#b5e08a", brightYellow: "#f0c88c", brightBlue: "#9cbcff", brightMagenta: "#cfb6ff", brightCyan: "#a4ddff", brightWhite: "#eef3fb",
+  "tokyo-night": {
+    background: "#1a1b26", foreground: "#a9b1d6", cursor: "#c0caf5", cursorAccent: "#1a1b26", selectionBackground: "#283457",
+    black: "#15161e", red: "#f7768e", green: "#9ece6a", yellow: "#e0af68", blue: "#7aa2f7", magenta: "#bb9af7", cyan: "#7dcfff", white: "#a9b1d6",
+    brightBlack: "#565f89", brightRed: "#ff899d", brightGreen: "#9fe044", brightYellow: "#faba4a", brightBlue: "#8db0ff", brightMagenta: "#c7a9ff", brightCyan: "#a4daff", brightWhite: "#c0caf5",
   },
 };
 

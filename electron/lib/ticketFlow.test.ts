@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 // eslint-disable-next-line @typescript-eslint/no-var-requires
-const { afterTurn, usageLimitHit, isTerminalReply } = require("./ticketFlow.cjs");
+const { afterTurn, afterPlanTurn, wantsWork, ownsPlan, afterRestart, usageLimitHit, isTerminalReply } = require("./ticketFlow.cjs");
 
 describe("what a ticket session's turn means", () => {
   it("an open PR at the end of a turn means review: the idle agent is ended so its slot frees", () => {
@@ -21,6 +21,37 @@ describe("what a ticket session's turn means", () => {
 
   it("a real usage-limit banner with no PR pauses", () => {
     expect(afterTurn({ pr: null, tail: "\u001b[31mClaude usage limit reached. Your limit will reset at 4pm\u001b[0m" })).toEqual({ pause: true });
+  });
+});
+
+describe("planning or work", () => {
+  it("a fresh ticket is planned; an approved one, one with feedback, or one with a branch is worked on", () => {
+    expect(wantsWork({ key: "A-1" })).toBe(false);
+    expect(wantsWork({ key: "A-1", approved: true })).toBe(true);
+    expect(wantsWork({ key: "A-1", priority: "feedback" })).toBe(true);
+    expect(wantsWork({ key: "A-1", branch: "a-1-x" })).toBe(true);
+  });
+
+  it("a planning turn with a plan is ready; a limit banner without one pauses; otherwise nothing changes", () => {
+    expect(afterPlanTurn({ planned: true, tail: "" })).toEqual({ state: "plan-ready" });
+    expect(afterPlanTurn({ planned: false, tail: "Claude usage limit reached. Your limit will reset at 4pm" })).toEqual({ pause: true });
+    expect(afterPlanTurn({ planned: false, tail: "Reading the code…" })).toBeNull();
+  });
+});
+
+describe("a planning session and its ticket", () => {
+  it("the plan still belongs to the ticket while it plans, or waits on the owner after the planner asked", () => {
+    expect(ownsPlan({ state: "planning", sessionId: "s1" }, "s1")).toBe(true);
+    expect(ownsPlan({ state: "needs-you", sessionId: "s1" }, "s1")).toBe(true);
+    expect(ownsPlan({ state: "needs-you", sessionId: "s2" }, "s1")).toBe(false);
+    expect(ownsPlan({ state: "plan-ready", sessionId: "s1" }, "s1")).toBe(false);
+    expect(ownsPlan(undefined, "s1")).toBe(false);
+  });
+
+  it("after a restart, work in flight needs the owner and a plan in flight is made again", () => {
+    expect(afterRestart({ state: "working" })).toEqual({ state: "needs-you", reason: "Pitlane was closed while it worked" });
+    expect(afterRestart({ state: "planning", sessionId: "s1" })).toEqual({ state: "queued", sessionId: undefined });
+    expect(afterRestart({ state: "plan-ready" })).toBeNull();
   });
 });
 

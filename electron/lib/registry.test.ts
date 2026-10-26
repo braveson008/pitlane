@@ -93,7 +93,7 @@ describe("project registry", () => {
     const project = await createRegistry({ file }).add(repo);
     const reopened = createRegistry({ file });
     expect(reopened.get(project.id)).toEqual(project);
-    expect(reopened.update(project.id, { theme: "acme" }).theme).toBe("acme");
-    expect(createRegistry({ file }).get(project.id).theme).toBe("acme");
+    expect(reopened.update(project.id, { theme: "nord" }).theme).toBe("nord");
+    expect(createRegistry({ file }).get(project.id).theme).toBe("nord");
   });
 });

@@ -108,7 +108,7 @@ export function SessionView({ project, session, theme, onAction, onRestart }: Se
   return (
     <>
       <header className="statusline">
-        <span className="hi glitch">{project.name}</span>
+        <span className="hi">{project.name}</span>
         <span className="lo">›</span>
         <span>{session.name}</span>
         <span className="agent">{session.agent}</span>

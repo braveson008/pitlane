@@ -6,25 +6,22 @@ const ANSI = ["black", "red", "green", "yellow", "blue", "magenta", "cyan", "whi
 const COLOUR = /^(#[0-9a-f]{6}|rgba\([^)]+\))$/i;
 
 describe("themes", () => {
-  it("nextTheme cycles through all seven and wraps", () => {
-    expect(THEME_ORDER).toEqual(["vt220", "acme", "night-city", "green-screen", "daylight", "synthwave", "midnight"]);
-    expect(nextTheme("vt220")).toBe("acme");
-    expect(nextTheme("night-city")).toBe("green-screen");
-    expect(nextTheme("midnight")).toBe("vt220");
-    for (const id of THEME_ORDER) expect(THEME_LABEL[id]).toBeTruthy();
+  it("nextTheme cycles through all five and wraps", () => {
+    expect(THEME_ORDER).toEqual(["github-dark", "nord", "one-dark", "dracula", "tokyo-night"]);
+    expect(nextTheme("github-dark")).toBe("nord");
+    expect(nextTheme("tokyo-night")).toBe("github-dark");
+    expect(THEME_LABEL).toEqual({ "github-dark": "GitHub Dark", nord: "Nord", "one-dark": "Atom One Dark", dracula: "Dracula", "tokyo-night": "Tokyo Night" });
   });
 
-  it("light themes keep white text readable on paper", () => {
-    for (const id of ["acme", "daylight"] as const) {
-      expect(xtermTheme(id).white).not.toMatch(/^#f/i);
-      expect(xtermTheme(id).brightWhite).not.toMatch(/^#f/i);
-    }
+  it("themeFor prefers the project, then the default, then GitHub Dark", () => {
+    expect(themeFor({ theme: "nord" }, { defaultTheme: "dracula" })).toBe("nord");
+    expect(themeFor({}, { defaultTheme: "dracula" })).toBe("dracula");
+    expect(themeFor(undefined, undefined)).toBe("github-dark");
   });
 
-  it("themeFor prefers the project, then the default, then vt220", () => {
-    expect(themeFor({ theme: "acme" }, { defaultTheme: "night-city" })).toBe("acme");
-    expect(themeFor({}, { defaultTheme: "night-city" })).toBe("night-city");
-    expect(themeFor(undefined, undefined)).toBe("vt220");
+  it("a theme saved by an earlier version that is gone now falls back to the next choice", () => {
+    expect(themeFor({ theme: "night-city" as never }, { defaultTheme: "nord" })).toBe("nord");
+    expect(themeFor({ theme: "vt220" as never }, { defaultTheme: "acme" as never })).toBe("github-dark");
   });
 
   it("xtermTheme sets every ANSI colour for every theme", () => {
@@ -36,13 +33,11 @@ describe("themes", () => {
     }
   });
 
-  it("night city selection is the flat cyan tint", () => {
-    expect(xtermTheme("night-city").selectionBackground).toBe("rgba(5,217,232,.14)");
-  });
-
-  it("vt220 and acme use their paper and phosphor", () => {
-    expect(xtermTheme("vt220").background).toBe("#0a0a08");
-    expect(xtermTheme("acme").background).toBe("#ffffea");
-    expect(xtermTheme("night-city").background).toBe("#07080b");
+  it("each theme uses its own well-known background", () => {
+    expect(xtermTheme("github-dark").background).toBe("#0d1117");
+    expect(xtermTheme("nord").background).toBe("#2e3440");
+    expect(xtermTheme("one-dark").background).toBe("#282c34");
+    expect(xtermTheme("dracula").background).toBe("#282a36");
+    expect(xtermTheme("tokyo-night").background).toBe("#1a1b26");
   });
 });

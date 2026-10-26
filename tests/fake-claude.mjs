@@ -11,8 +11,16 @@ if (args.includes("-p")) {
   process.stdin.on("data", (chunk) => { input += chunk; });
   process.stdin.on("end", () => {
     const tasks = JSON.parse(fs.readFileSync(process.env.PITLANE_FAKE_TICKETS, "utf8"));
-    const asked = input.match(/Match this optional search: (\S+)/)?.[1];
-    const chosen = asked ? tasks.filter((task) => task.id === asked.replace(/\.$/, "")) : tasks;
+    const asked = input.match(/item whose key is (\S+),/)?.[1];
+    // A watch with the owner's own instructions answers from its own fixture.
+    const custom = input.match(/in their words: (.+)/)?.[1];
+    if (custom && !asked) {
+      const found = JSON.parse(fs.readFileSync(process.env.PITLANE_FAKE_CUSTOM_TICKETS, "utf8"))[custom] ?? [];
+      return process.stdout.write(JSON.stringify({ type: "result", result: JSON.stringify({ tasks: found }) }));
+    }
+    const customFile = process.env.PITLANE_FAKE_CUSTOM_TICKETS;
+    const everyTicket = [...tasks, ...(customFile && fs.existsSync(customFile) ? Object.values(JSON.parse(fs.readFileSync(customFile, "utf8"))).flat() : [])];
+    const chosen = asked ? everyTicket.filter((task) => task.id === asked) : tasks;
     process.stdout.write(JSON.stringify({ type: "result", result: JSON.stringify({ tasks: chosen }) }));
   });
 } else {
@@ -24,6 +32,7 @@ if (args.includes("-p")) {
   const settingsAt = args.indexOf("--settings");
   const stopHook = settingsAt >= 0 ? JSON.parse(args[settingsAt + 1]).hooks?.Stop?.[0]?.hooks?.[0]?.command : null;
   const turnEnded = () => { if (stopHook) execSync(stopHook, { input: "{}", stdio: ["pipe", "ignore", "ignore"] }); };
+  const notificationHook = settingsAt >= 0 ? JSON.parse(args[settingsAt + 1]).hooks?.Notification?.[0]?.hooks?.[0]?.command : null;
   const lines = readline.createInterface({ input: process.stdin });
   lines.on("line", (line) => {
     handle(line);
@@ -39,6 +48,21 @@ if (args.includes("-p")) {
         comments: [{ path: "README.md", line: 2, body: "This line needs a test." }, { path: "README.md", line: 2, body: "Nit: wording." }],
       }));
       return process.stdout.write("review written\r\n");
+    }
+    if (line === "ask") {
+      if (notificationHook) execSync(notificationHook, { input: JSON.stringify({ message: "May I read the docs?" }), stdio: ["pipe", "ignore", "ignore"] });
+      return process.stdout.write("asked\r\n");
+    }
+    if (line === "creds") return process.stdout.write(`gh-token:[${process.env.GH_TOKEN ?? "unset"}] denied:${args.includes("--disallowedTools")}\r\n`);
+    if (line === "plan") {
+      fs.mkdirSync(".pitlane", { recursive: true });
+      fs.writeFileSync(".pitlane/plan.md", [
+        "# Plan", "", "Do the thing.", "", "## Approach", "",
+        `The **work** goes in \`src/thing.ts\`. ${"A long sentence that has to wrap at the edge of the screen instead of running off it. ".repeat(6)}`,
+        "", "```json", '{ "restrictionEnabled": true }', "```", "",
+        ...Array.from({ length: 60 }, (_, index) => `${index + 1}. step ${index + 1}`),
+      ].join("\n") + "\n");
+      return process.stdout.write("plan written\r\n");
     }
     if (line === "branch") return process.stdout.write(`branch: ${execFileSync("git", ["branch", "--show-current"], { encoding: "utf8" }).trim()}\r\n`);
     if (line === "open-pr") {

@@ -186,6 +186,14 @@ describe("agent sessions", () => {
     expect(manager.get(session.id).attention).toBeUndefined();
   });
 
+  it("clearing can be limited to sessions that ended before a time", () => {
+    const old = { id: "old", projectId: "p", agent: "claude", name: "old", cwd: "/a", state: "exited", createdAt: 0, endedAt: 100 };
+    const recent = { ...old, id: "recent", endedAt: 900 };
+    const { manager } = setup({ saved: [old, recent] });
+    expect(manager.clearEnded("p", { before: 500 })).toBe(1);
+    expect(manager.list("p").map((session: { id: string }) => session.id)).toEqual(["recent"]);
+  });
+
   it("clearing ended sessions removes only those that ended and the caller does not keep", () => {
     const { manager, ptys, stored } = setup();
     const running = manager.create({ projectId: "p", agent: "claude", cwd: "/a" });
@@ -198,6 +206,18 @@ describe("agent sessions", () => {
     expect(manager.list("q")).toHaveLength(1);
     expect((stored() as { id: string }[]).some((session) => session.id === done.id)).toBe(false);
     expect(elsewhere.state).toBe("exited");
+  });
+
+  it("remove forgets one ended session, never a running one", () => {
+    const { manager, ptys, stored } = setup();
+    const running = manager.create({ projectId: "p", agent: "claude", cwd: "/a" });
+    const done = manager.create({ projectId: "p", agent: "claude", cwd: "/b" });
+    ptys[1].emit("exit", { exitCode: 0 });
+    expect(() => manager.remove(running.id)).toThrow("stop it first");
+    expect(manager.remove(done.id)).toBe(true);
+    expect(manager.list("p").map((session: { id: string }) => session.id)).toEqual([running.id]);
+    expect((stored() as { id: string }[]).some((session) => session.id === done.id)).toBe(false);
+    expect(manager.remove("nope")).toBe(false);
   });
 
   it("a session the owner stopped says so", () => {

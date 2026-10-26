@@ -5,7 +5,8 @@ const MODELS = ["sonnet", "haiku", "opus"];
 const KINDS = ["ticket-assigned", "review-requested"];
 
 const newId = () => `w-${crypto.randomBytes(4).toString("hex")}`;
-const sameTarget = (a, b) => a.kind === b.kind && (a.server ?? null) === (b.server ?? null) && (a.scope ?? "") === (b.scope ?? "");
+const sameTarget = (a, b) => a.kind === b.kind && (a.server ?? null) === (b.server ?? null) && (a.scope ?? "") === (b.scope ?? "") && (a.instructions ?? "") === (b.instructions ?? "");
+const trimmed = (value, limit) => String(value ?? "").trim().slice(0, limit);
 
 function checkServer(server, servers) {
   if (!servers.length) throw new Error("no Jira or Linear MCP server for this project");
@@ -29,19 +30,20 @@ function scopeFromHistory(log) {
   return [...counts].filter(([, count]) => count >= 3).sort((a, b) => b[1] - a[1]).slice(0, 3).map(([prefix]) => prefix).join(" or ");
 }
 
-function addWatch(watches, { kind, server, scope }, { servers }) {
+function addWatch(watches, { kind, server, scope, instructions }, { servers }) {
   if (!KINDS.includes(kind)) throw new Error(`Unknown watch kind ${kind}`);
   const watch = { id: newId(), kind, intervalSeconds: 300, model: "sonnet", enabled: false };
   if (kind === "ticket-assigned") {
     checkServer(server, servers);
     watch.server = server;
-    if (scope) watch.scope = String(scope).trim().slice(0, 120);
+    if (scope) watch.scope = trimmed(scope, 120);
+    if (trimmed(instructions, 500)) watch.instructions = trimmed(instructions, 500);
   }
   if (watches.some((existing) => sameTarget(existing, watch))) throw new Error("that watch is already there");
   return [...watches, watch];
 }
 
-/** Applies the owner's changes: server, scope, interval and model. What it watched before is forgotten when that changes. */
+/** Applies the owner's changes: server, scope, instructions, interval and model. What it watched before is forgotten when that changes. */
 function editWatch(watches, id, patch, { servers }) {
   const index = watches.findIndex((watch) => watch.id === id);
   if (index < 0) throw new Error("No such watch");
@@ -60,9 +62,14 @@ function editWatch(watches, id, patch, { servers }) {
     watch.server = patch.server;
   }
   if (watch.kind === "ticket-assigned" && patch.scope !== undefined) {
-    const scope = String(patch.scope).trim().slice(0, 120);
+    const scope = trimmed(patch.scope, 120);
     if (scope) watch.scope = scope;
     else delete watch.scope;
+  }
+  if (watch.kind === "ticket-assigned" && patch.instructions !== undefined) {
+    const instructions = trimmed(patch.instructions, 500);
+    if (instructions) watch.instructions = instructions;
+    else delete watch.instructions;
   }
   if (!sameTarget(before, watch)) {
     if (watches.some((other, at) => at !== index && sameTarget(other, watch))) throw new Error("that watch is already there");
@@ -78,17 +85,39 @@ function removeWatch(watches, id) {
   return watches.filter((watch) => watch.id !== id);
 }
 
+const runnable = (watch) => KINDS.includes(watch.kind) && (watch.kind !== "ticket-assigned" || Boolean(watch.server));
+
+/** Marks a watch, or with no id every watch that is on, to be checked on the next pass. A paused watch run this way stays paused. */
+function runNow(watches, id) {
+  if (id === undefined) {
+    if (!watches.some((watch) => watch.enabled && runnable(watch))) throw new Error("no watch is on · w to switch one on");
+    return watches.map((watch) => (watch.enabled && runnable(watch) ? { ...watch, due: true } : watch));
+  }
+  const watch = watches.find((each) => each.id === id);
+  if (!watch) throw new Error("No such watch");
+  if (!runnable(watch)) throw new Error("this watch has no tracker to ask · e to pick one");
+  return watches.map((each) => (each === watch ? { ...each, due: true } : each));
+}
+
+/** Whether a pass should check this watch now. */
+function isDue(watch, now, intervalMs = watch.intervalSeconds * 1000) {
+  if (!runnable(watch)) return false;
+  if (watch.due) return true;
+  return Boolean(watch.enabled) && (!watch.lastCheckedAt || now - watch.lastCheckedAt >= intervalMs);
+}
+
 /** For each of this project's ticket watches, the other projects whose enabled watch asks the same tracker the same question. */
 function overlaps(projects, projectId) {
   const ticketWatches = (project) => withIds(project.watches).filter((watch) => watch.kind === "ticket-assigned" && watch.server);
   const project = projects.find((each) => each.id === projectId);
   const found = {};
   for (const watch of project ? ticketWatches(project) : []) {
-    const sameAsk = (other) => other.enabled && other.server === watch.server && (other.scope ?? "").toLowerCase() === (watch.scope ?? "").toLowerCase();
+    const same = (field) => (other) => (other[field] ?? "").toLowerCase() === (watch[field] ?? "").toLowerCase();
+    const sameAsk = (other) => other.enabled && other.server === watch.server && same("scope")(other) && same("instructions")(other);
     const names = projects.filter((other) => other.id !== projectId && ticketWatches(other).some(sameAsk)).map((other) => other.name);
     if (names.length) found[watch.id] = names;
   }
   return found;
 }
 
-module.exports = { addWatch, editWatch, removeWatch, withIds, overlaps, scopeFromHistory, INTERVALS, MODELS, KINDS };
+module.exports = { addWatch, editWatch, removeWatch, runNow, isDue, withIds, overlaps, scopeFromHistory, INTERVALS, MODELS, KINDS };

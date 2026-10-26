@@ -44,4 +44,13 @@ describe("lead prompt", () => {
     expect(prompt).toContain("Address the feedback, then push to the same branch");
     expect(prompt).toContain("Do not reply to anyone");
   });
+
+  it("carries an approved plan as data and follows it", () => {
+    const prompt = leadPrompt({ ticket, branch: "b", base: "origin/main", host: "github", plan: "Step A" });
+    expect(prompt).toMatch(/```plan\nStep A\n```/);
+    expect(prompt).toContain("1. Follow the approved plan above. If the code shows it is wrong, change course and say why in the PR description.");
+    const without = leadPrompt({ ticket, branch: "b", base: "origin/main", host: "github" });
+    expect(without).not.toContain("approved plan");
+    expect(without).toContain("1. Read the relevant code and plan the change.");
+  });
 });

@@ -6,7 +6,7 @@ import { ago, orderSessions, sessionMarker, stateLabel } from "../lib/sessionOrd
 import { homeKey } from "../lib/keys";
 import { nextTheme, THEME_LABEL, THEME_ORDER, type ThemeId } from "../theme/themes";
 import { notStarted, ticketLabel, upNext } from "../lib/queue";
-import { overlapNote, watchSource, watchTitle } from "../lib/watches";
+import { overlapNote, watchNotes, watchSource, watchTitle } from "../lib/watches";
 import { useOverlaps, useSuggestedScope } from "./Watches";
 
 const AGENT_CHOICES: AgentId[] = ["claude", "codex"];
@@ -21,6 +21,7 @@ interface HomeProps {
   onOpen: (session: Session) => void;
   onChanges: (session: Session) => void;
   onDraft: (ticket: Ticket) => void;
+  onPlan: (ticket: Ticket) => void;
   onProject: (project: Project) => void;
   onMissing: () => void;
   onWatches: () => void;
@@ -28,7 +29,7 @@ interface HomeProps {
   paused?: boolean;
 }
 
-export function Home({ project, theme, sessions, workspaces, tickets, pausedUntil, onOpen, onChanges, onDraft, onProject, onMissing, onWatches, paused = false }: HomeProps) {
+export function Home({ project, theme, sessions, workspaces, tickets, pausedUntil, onOpen, onChanges, onDraft, onPlan, onProject, onMissing, onWatches, paused = false }: HomeProps) {
   const [now, setNow] = useState(Date.now());
   const [selected, setSelected] = useState(0);
   const [choosing, setChoosing] = useState<number | null>(null);
@@ -43,11 +44,10 @@ export function Home({ project, theme, sessions, workspaces, tickets, pausedUnti
   const watches = project.watches ?? [];
   const overlapping = useOverlaps(project);
   const suggested = useSuggestedScope(project);
-  const waiting = tickets.filter((ticket) => ticket.state === "needs-you" || ticket.state === "review-ready");
+  const waiting = tickets.filter((ticket) => ticket.state === "needs-you" || ticket.state === "review-ready" || ticket.state === "plan-ready");
   const next = upNext(tickets);
   const assigned = notStarted(tickets);
   const reviews = tickets.filter((ticket) => ticket.state === "in-review");
-  const busySlots = workspaces.filter((slot) => slot.state !== "free").length;
   // One cursor over everything on the screen, in the order it is drawn.
   type Row = { kind: "ticket"; ticket: Ticket } | { kind: "session"; session: Session } | { kind: "review"; ticket: Ticket } | { kind: "assigned" };
   const rows: Row[] = [
@@ -105,9 +105,9 @@ export function Home({ project, theme, sessions, workspaces, tickets, pausedUnti
     if (isFailure(result)) setError(result.error);
   }
 
-  async function cycleLimit() {
-    const updated = await api().projects.update(project.id, { agentLimit: (project.agentLimit % 3) + 1 });
-    if (!isFailure(updated)) onProject(updated);
+  async function remove(session: Session) {
+    const result = await api().sessions.delete(session.id);
+    if (isFailure(result)) setError(result.error);
   }
 
   function stop(session: Session) {
@@ -128,6 +128,7 @@ export function Home({ project, theme, sessions, workspaces, tickets, pausedUnti
 
   function startTicket(ticket: Ticket) {
     if (ticket.state === "review-ready") return onDraft(ticket);
+    if (ticket.state === "plan-ready") return onPlan(ticket);
     const running = sessions.find((session) => session.id === ticket.sessionId && session.state === "running");
     if (running) return onOpen(running);
     void api().tickets.start(project.id, ticket.key);
@@ -153,6 +154,13 @@ export function Home({ project, theme, sessions, workspaces, tickets, pausedUnti
       if (!action) return;
       event.preventDefault();
       if (action === "watches") return onWatches();
+      if (action === "runWatches") {
+        return void api().watches.checkAll(project.id).then((updated) => {
+          if (isFailure(updated)) return setError(updated.error);
+          setError("");
+          onProject(updated);
+        });
+      }
       if (action === "update") return void (update?.status === "ready" ? api().updates.install() : api().updates.check());
       if (action === "assigned") return setShowAssigned((shown) => !shown);
       if (action === "stop" && currentSession) return stop(currentSession);
@@ -177,7 +185,7 @@ export function Home({ project, theme, sessions, workspaces, tickets, pausedUnti
       if (action === "help") setHelp((shown) => !shown);
       if (action === "park" && currentSession) void park(currentSession);
       if (action === "park" && currentTicket?.state === "queued") void unqueue(currentTicket);
-      if (action === "limit") void cycleLimit();
+      if (action === "delete" && currentSession) return void remove(currentSession);
       if (action === "changes" && currentSession) onChanges(currentSession);
     };
     window.addEventListener("keydown", onKey);
@@ -189,19 +197,8 @@ export function Home({ project, theme, sessions, workspaces, tickets, pausedUnti
   return (
     <>
       <header className="statusline">
-        {theme === "acme" ? (
-          <>
-            <span className="hi">/{project.name}/</span>
-            <button type="button" className="tagword" onClick={() => setChoosing(0)}>New</button>
-            <button type="button" className="tagword" onClick={() => void cycleTheme()}>Theme</button>
-            <button type="button" className="tagword" onClick={() => setHelp((shown) => !shown)}>Help</button>
-          </>
-        ) : (
-          <>
-            <span className="hi glitch">{theme === "night-city" ? `${project.name}//` : project.name}</span>
-            <span className="ok">{project.trunk}</span>
-          </>
-        )}
+        <span className="hi">{project.name}</span>
+        <span className="ok">{project.trunk}</span>
         <span className="spacer" />
         <UpdateNote />
         <span className="lo">{ordered.length} {ordered.length === 1 ? "session" : "sessions"}{running ? ` · ${running} running` : ""}</span>
@@ -211,14 +208,14 @@ export function Home({ project, theme, sessions, workspaces, tickets, pausedUnti
         <section className="section" aria-label="Sessions">
           <p className="hi heading">SESSIONS</p>
           {ordered.length === 0 ? <p className="lo">No sessions yet. Press n to start an agent.</p> : null}
-          <p className="lo">workspaces {busySlots}/{project.agentLimit} in use{endedCount ? ` · ${endedCount} ended · C clears them` : ""}</p>
+          {endedCount ? <p className="lo">{endedCount} ended · C clears them</p> : null}
           {pausedUntil ? <p className="need">paused: usage limit · resumes {new Date(pausedUntil).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}</p> : null}
           <div className="rows">{waiting.map((ticket) => (
             <button key={ticket.key} type="button" className={`row${isSelected((row) => row.kind === "ticket" && row.ticket.key === ticket.key) ? " sel" : ""}`} onClick={() => startTicket(ticket)}>
               <span className="need">!</span>
               <span><span className="id">{ticket.key}</span> {ticket.title}</span>
-              <span className="need">{ticket.state === "review-ready" ? "review ready" : "needs you"}</span>
-              <span className="lo">{ticket.state === "review-ready" ? ticket.draft?.verdict : ticket.reason}</span>
+              <span className="need">{ticket.state === "review-ready" ? "review ready" : ticket.state === "plan-ready" ? "plan ready" : "needs you"}</span>
+              <span className="lo">{ticket.state === "review-ready" ? ticket.draft?.verdict : ticket.state === "plan-ready" ? "enter reads it" : ticket.reason}</span>
               <span className="lo right">{ago(ticket.updatedAt, now)}</span>
             </button>
           ))}</div>
@@ -261,7 +258,7 @@ export function Home({ project, theme, sessions, workspaces, tickets, pausedUnti
         {next.length ? (
           <section className="section" aria-label="Up next">
             <p className="hi heading">UP NEXT</p>
-            <p className="lo">{busySlots < project.agentLimit ? "starting now" : `starts by itself when a workspace is free (${busySlots}/${project.agentLimit} in use · L for more)`}</p>
+            <p className="lo">starting now</p>
             <div className="rows">{next.map((ticket, index) => (
               <button key={ticket.key} type="button" className={`row${isSelected((row) => row.kind === "ticket" && row.ticket.key === ticket.key) ? " sel" : ""}`} onClick={() => startTicket(ticket)} title={ticket.url}>
                 <span className="hi">{index + 1}</span>
@@ -318,9 +315,9 @@ export function Home({ project, theme, sessions, workspaces, tickets, pausedUnti
             <div className="rows">{watches.map((watch) => (
               <p key={watch.id} className="row">
                 <span className={watch.lastError ? "need" : watch.enabled ? "ok" : "lo"}>{watch.enabled ? "●" : "○"}</span>
-                <span>{watchTitle(watch)} <span className="id">{watchSource(watch, project)}</span>{watch.scope ? <span className="lo"> · only {watch.scope}</span> : null}</span>
+                <span>{watchTitle(watch)} <span className="id">{watchSource(watch, project)}</span><span className="lo">{watchNotes(watch)}</span></span>
                 <span className="agent">{watch.model}</span>
-                <span className={watch.lastError ? "need" : watch.enabled ? "ok" : "lo"}>{watch.lastError ? "error" : watch.enabled ? "on" : "paused"}</span>
+                <span className={watch.due ? "id" : watch.lastError ? "need" : watch.enabled ? "ok" : "lo"}>{watch.due ? "checking now…" : watch.lastError ? "error" : watch.enabled ? "on" : "paused"}</span>
                 <span className="lo right">{Math.round(watch.intervalSeconds / 60)}m</span>
               </p>
             ))}</div>
@@ -338,6 +335,7 @@ export function Home({ project, theme, sessions, workspaces, tickets, pausedUnti
             <p><span className="hi">n</span> <span className="lo">start a new agent session</span></p>
             <p><span className="hi">t</span> <span className="lo">next theme ({THEME_ORDER.map((id) => THEME_LABEL[id]).join(", ")})</span></p>
             <p><span className="hi">w</span> <span className="lo">watches: add, edit, switch on or off, remove</span></p>
+            <p><span className="hi">r</span> <span className="lo">run every watch that is on now, instead of waiting for its next check</span></p>
             <p><span className="hi">U</span> <span className="lo">restart into a new version once one is ready, or check for one</span></p>
             <p><span className="hi">s s</span> <span className="lo">stop the selected session's agent</span></p>
             <p><span className="hi">C</span> <span className="lo">clear ended sessions (ones holding kept work stay)</span></p>
@@ -345,10 +343,10 @@ export function Home({ project, theme, sessions, workspaces, tickets, pausedUnti
             <p><span className="hi">p</span> <span className="lo">open the pull request of the first ticket in review</span></p>
             <p><span className="hi">c</span> <span className="lo">what the selected session's agent changed · ⌘D inside a session</span></p>
             <p><span className="hi">x x</span> <span className="lo">park a held session: commit its work locally and free its workspace</span></p>
-            <p><span className="hi">L</span> <span className="lo">agents at once in this project (1–3)</span></p>
+            <p><span className="hi">X</span> <span className="lo">delete the selected session at once: a running agent is stopped first, and whatever its workspace kept is thrown away</span></p>
             <p><span className="hi">j k ↑ ↓</span> <span className="lo">move</span></p>
             <p><span className="hi">⌘K</span> <span className="lo">switch session · inside a session ⌘↑ comes back here</span></p>
-            <p><span className="hi">⌘N</span> <span className="lo">open another project in its own window · or right-click Pitlane in the Dock</span></p>
+            <p><span className="hi">⌘1–⌘9</span> <span className="lo">switch to the project in that place in the tabs at the top · or click its tab · + adds a folder</span></p>
           </section>
         ) : null}
       </div>
@@ -357,6 +355,7 @@ export function Home({ project, theme, sessions, workspaces, tickets, pausedUnti
         <span><span className="key">enter</span> open</span>
         <span><span className="key">n</span> new</span>
         <span><span className="key">w</span> watches</span>
+        {watches.some((watch) => watch.enabled) ? <span><span className="key">r</span> run watches</span> : null}
         <span><span className="key">t</span> theme</span>
         <span><span className="key">?</span> help</span>
       </footer>

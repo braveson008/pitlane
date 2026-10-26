@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { homeKey } from "./keys";
+import { homeKey, planKey, projectKey } from "./keys";
 
 const key = (k: string, mods: Partial<KeyboardEvent> = {}) => ({ key: k, metaKey: false, ctrlKey: false, altKey: false, ...mods }) as KeyboardEvent;
 
@@ -9,6 +9,16 @@ describe("home keys", () => {
     expect(homeKey(key("n"))).toBe("new");
     expect(homeKey(key("t"))).toBe("theme");
     expect(homeKey(key("?"))).toBe("help");
+  });
+
+  it("X deletes the selected session in one press; d and L mean nothing", () => {
+    expect(homeKey(key("X"))).toBe("delete");
+    expect(homeKey(key("d"))).toBeNull();
+    expect(homeKey(key("L"))).toBeNull();
+  });
+
+  it("r runs the project's watches now", () => {
+    expect(homeKey(key("r"))).toBe("runWatches");
   });
 
   it("j and k move like the arrows", () => {
@@ -32,9 +42,8 @@ describe("home keys", () => {
     expect(homeKey(key(" "))).toBeNull();
   });
 
-  it("x parks and L changes the agent limit", () => {
+  it("x parks a held session", () => {
     expect(homeKey(key("x"))).toBe("park");
-    expect(homeKey(key("L", { shiftKey: true } as Partial<KeyboardEvent>))).toBe("limit");
   });
 
   it("chords are ignored on home", () => {
@@ -106,5 +115,31 @@ describe("draft keys", () => {
     expect(draftKey(key("Escape"))).toBe("back");
     expect(draftKey(key("j"))).toBe("down");
     expect(draftKey(key("a", { metaKey: true }))).toBeNull();
+  });
+});
+
+describe("plan keys", () => {
+  it("start work, discard, scroll and back", () => {
+    expect(planKey(key("s"))).toBe("start");
+    expect(planKey(key("d"))).toBe("discard");
+    expect(planKey(key("Escape"))).toBe("back");
+    expect(planKey(key("j"))).toBe("down");
+    expect(planKey(key("k"))).toBe("up");
+    expect(planKey(key("s", { metaKey: true }))).toBeNull();
+  });
+});
+
+describe("projectKey", () => {
+  it("⌘1 to ⌘9 pick the project in that place", () => {
+    expect(projectKey(key("1", { metaKey: true }))).toBe(0);
+    expect(projectKey(key("9", { metaKey: true }))).toBe(8);
+  });
+
+  it("leaves digits without ⌘, ⌘0, and other chords alone", () => {
+    expect(projectKey(key("1"))).toBeNull();
+    expect(projectKey(key("0", { metaKey: true }))).toBeNull();
+    expect(projectKey(key("1", { metaKey: true, altKey: true }))).toBeNull();
+    expect(projectKey(key("1", { metaKey: true, ctrlKey: true }))).toBeNull();
+    expect(projectKey(key("k", { metaKey: true }))).toBeNull();
   });
 });

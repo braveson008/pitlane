@@ -21,6 +21,30 @@ function afterTurn({ pr, tail }) {
   return null;
 }
 
+/** Whether a queued ticket goes to the lead agent; otherwise it is planned first. Work under way before plans existed carries on. */
+function wantsWork(ticket) {
+  return Boolean(ticket.approved || ticket.priority === "feedback" || ticket.branch);
+}
+
+/** What the end of a planning turn means: a plan is ready for the owner, or the limit was hit before one was written. */
+function afterPlanTurn({ planned, tail }) {
+  if (planned) return { state: "plan-ready" };
+  if (usageLimitHit(tail)) return { pause: true };
+  return null;
+}
+
+/** Whether a planning session's plan still belongs to its ticket: still planning, or waiting on the owner after the planner asked. */
+function ownsPlan(ticket, sessionId) {
+  return Boolean(ticket && ticket.sessionId === sessionId && (ticket.state === "planning" || ticket.state === "needs-you"));
+}
+
+/** What a ticket the last run left mid-flight becomes: work needs the owner; a plan is simply made again. */
+function afterRestart(ticket) {
+  if (ticket.state === "working") return { state: "needs-you", reason: "Pitlane was closed while it worked" };
+  if (ticket.state === "planning") return { state: "queued", sessionId: undefined };
+  return null;
+}
+
 // Focus reports, device attributes, cursor position and colour answers: xterm sends these itself.
 const REPLIES = [/^\x1b\[[IO]$/, /^\x1b\[\?[\d;]*c$/, /^\x1b\[>[\d;]*c$/, /^\x1b\[\d+;\d+R$/, /^\x1b\][\d;]*[^\x07\x1b]*(\x07|\x1b\\)$/];
 
@@ -29,4 +53,4 @@ function isTerminalReply(data) {
   return REPLIES.some((reply) => reply.test(String(data)));
 }
 
-module.exports = { afterTurn, usageLimitHit, isTerminalReply };
+module.exports = { afterTurn, afterPlanTurn, wantsWork, ownsPlan, afterRestart, usageLimitHit, isTerminalReply };

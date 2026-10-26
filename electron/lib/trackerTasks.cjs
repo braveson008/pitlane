@@ -70,14 +70,18 @@ function buildPickTaskPrompt({ source, hint = "" } = {}) {
  * Import remains a two-step action: the MCP may read the tracker, but Pitlane
  * does not create anything until the user selects items in the preview.
  */
-function buildListTasksPrompt({ source, query = "", scope = "", limit = 25, brief = false } = {}) {
+function buildListTasksPrompt({ source, query = "", scope = "", limit = 25, brief = false, instructions = "", key = "" } = {}) {
   const boundedLimit = Math.max(1, Math.min(50, Number(limit) || 25));
+  const which = key
+    ? [`- Only the item whose key is ${clean(key, 40)}, whoever it is assigned to and whatever its state.`]
+    : instructions
+      ? [`- What the owner asked for, in their words: ${clean(instructions, 500)}`]
+      : ["- Assigned to the currently authenticated user.", "- Still open: a to-do, backlog, or in-progress state. Exclude done, closed, and cancelled items."];
   return [
     `Use the ${source} tools to list work items, then stop. This is a read-only request.`,
     "",
     "Which items:",
-    "- Assigned to the currently authenticated user.",
-    "- Still open: a to-do, backlog, or in-progress state. Exclude done, closed, and cancelled items.",
+    ...which,
     "- Most recently updated first.",
     // One account can reach several sites, so "assigned to me" alone mixes
     // another employer's or team's work into this project.

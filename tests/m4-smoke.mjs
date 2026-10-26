@@ -35,6 +35,7 @@ const app = await launch(temp, {
   PITLANE_FAKE_TICKETS: file("tickets.json"),
   PITLANE_FAKE_PRS: file("prs.json"),
   PITLANE_FAKE_REVIEWS: file("reviews.json"),
+  PITLANE_FAKE_OWN_PRS: file("own.json"),
   PITLANE_FAKE_FEEDBACK: file("feedback.json"),
   PITLANE_FAKE_POSTED: file("posted.json"),
   PITLANE_WATCH_TICK_MS: "1000",
@@ -89,11 +90,10 @@ try {
     await current.keyboard.press("Enter");
     await current.getByLabel("Review draft").getByText("One real issue and a nit.").waitFor();
   };
-  for (const theme of ["acme", "night-city", "vt220"]) {
-    await current.evaluate(({ id, theme }) => window.pitlane.projects.update(id, { theme }), { id, theme }).catch(() => {});
-    await new Promise((resolve) => setTimeout(resolve, 800));
-    current = await projectWindow(app);
+  for (const theme of ["nord", "dracula", "github-dark"]) {
+    assert.equal((await current.evaluate(({ id, theme }) => window.pitlane.projects.update(id, { theme }), { id, theme })).theme, theme);
     await current.reload();
+    assert.equal(await current.evaluate(() => document.documentElement.dataset.theme), theme);
     await current.getByLabel("Sessions").waitFor();
     await openDraft();
     await current.screenshot({ path: path.join(shots, `${theme}-draft.png`) });
@@ -115,8 +115,20 @@ try {
   assert.deepEqual(posted.comments, [{ path: "README.md", line: 2, side: "RIGHT", body: "This line needs a test." }]);
   console.log("PASS the owner drops a comment and approves; exactly one review is posted, with what they kept");
 
-  await until("SHOP-9 running", async () => /SHOP-9[\s\S]*running/.test(await sessions.innerText()), 30000);
-  await sessions.getByRole("button", { name: /SHOP-9/ }).click();
+  // The ticket is planned first; its work starts once the owner starts it from the plan.
+  await until("SHOP-9 planning", async () => /SHOP-9 plan[\s\S]*running/.test(await sessions.innerText()), 30000);
+  await sessions.getByRole("button", { name: /SHOP-9 plan/ }).first().click();
+  await page2.locator(".xterm").waitFor();
+  await page2.keyboard.type("plan");
+  await page2.keyboard.press("Enter");
+  await page2.keyboard.press("Meta+ArrowUp");
+  await until("SHOP-9 plan ready", async () => /SHOP-9[\s\S]*plan ready/.test(await sessions.innerText()), 20000);
+  await sessions.getByRole("button", { name: /SHOP-9.*plan ready/ }).click();
+  await page2.getByLabel("Plan").getByText("Do the thing.").waitFor();
+  await page2.keyboard.press("s");
+  await page2.keyboard.press("s");
+  await until("SHOP-9 running", async () => /SHOP-9 Ninth thing[\s\S]*running/.test(await sessions.innerText()), 30000);
+  await sessions.getByRole("button", { name: /SHOP-9 Ninth thing/ }).first().click();
   await page2.locator(".xterm").waitFor();
   await page2.keyboard.type("open-pr");
   await page2.keyboard.press("Enter");
@@ -125,9 +137,39 @@ try {
   await until("SHOP-9 in review", async () => /SHOP-9/.test(await review.innerText()), 20000);
   await writeFile(file("feedback.json"), JSON.stringify({ reviewDecision: "CHANGES_REQUESTED", reviews: [{ author: { login: "lead" }, authorAssociation: "MEMBER", state: "CHANGES_REQUESTED", body: "Handle the empty cart.", submittedAt: new Date(Date.now() + 60_000).toISOString() }], comments: [], statusCheckRollup: [] }));
   await until("SHOP-9 back at work", async () => /SHOP-9[\s\S]*running/.test(await sessions.innerText()), 30000);
-  await sessions.getByRole("button", { name: /SHOP-9/ }).first().click();
+  await sessions.getByRole("button", { name: /SHOP-9 Ninth thing/ }).first().click();
   await until("feedback in the prompt", async () => /prompt has feedback/.test(await terminalText(page2)), 15000);
+  assert.doesNotMatch(await terminalText(page2), /prompt: Plan SHOP-9/, "feedback goes straight to work, not to a new plan");
   console.log("PASS changes requested on its own PR send the ticket back to work with the feedback");
+  await page2.keyboard.type("exit");
+  await page2.keyboard.press("Enter");
+  await page2.keyboard.press("Meta+ArrowUp");
+
+  // The owner's own PR is reviewed too; its review can only be a comment.
+  git("switch", "-q", "-c", "mine");
+  await writeFile(path.join(repo, "README.md"), "# shop\nMy own line\n");
+  git("commit", "-qam", "my change");
+  git("push", "-q", "origin", "HEAD:refs/pull/7/head");
+  git("switch", "-q", "main");
+  git("branch", "-q", "-D", "mine");
+  await writeFile(file("own.json"), JSON.stringify([{ number: 7, title: "My change", url: "https://github.com/acme/shop/pull/7", headRefName: "mine", author: { login: "owner" } }]));
+  await until("my PR in review", async () => /review:7[\s\S]*running/.test(await sessions.innerText()), 30000);
+  await sessions.getByRole("button", { name: /review:7/ }).first().click();
+  await page2.locator(".xterm").waitFor();
+  await page2.keyboard.type("review");
+  await page2.keyboard.press("Enter");
+  await page2.keyboard.press("Meta+ArrowUp");
+  await until("my review ready", async () => /review:7[\s\S]*review ready/.test(await sessions.innerText()), 20000);
+  await sessions.getByRole("button", { name: /review:7.*review ready/ }).click();
+  const statusline = page2.locator(".statusline");
+  await page2.getByLabel("Review draft").waitFor();
+  assert.match(await statusline.innerText(), /comment$/m, "a review of my own PR is a comment");
+  await page2.keyboard.press("v");
+  await new Promise((resolve) => setTimeout(resolve, 300));
+  assert.match(await statusline.innerText(), /comment$/m, "and stays one");
+  assert.doesNotMatch(await page2.locator(".hints").innerText(), /verdict/);
+  await page2.keyboard.press("Escape");
+  console.log("PASS the owner's own PR is reviewed, and its draft can only be a comment");
 
   assert.equal(git("branch", "--show-current"), after.branch);
   assert.equal(git("status", "--porcelain"), after.status);

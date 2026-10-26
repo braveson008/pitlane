@@ -1,6 +1,7 @@
 // Stands in for gh in end-to-end tests. Fixtures (JSON files named by env vars):
 //   PITLANE_FAKE_PRS       branch -> { url, state }                     pr list
 //   PITLANE_FAKE_REVIEWS   [{ number, title, url, headRefName, author }] search prs --review-requested
+//   PITLANE_FAKE_OWN_PRS   [{ number, title, url, headRefName, author }] pr list --author @me
 //   PITLANE_FAKE_FEEDBACK  { reviewDecision, reviews, comments, statusCheckRollup }  pr view <url> --json reviewDecision,...
 //   PITLANE_FAKE_POSTED    written: the body of each posted review     api repos/.../reviews
 import fs from "node:fs";
@@ -34,6 +35,8 @@ if (args[0] === "search" && args[1] === "prs") {
 } else if (args[0] === "pr" && args[1] === "view") {
   if ((args[3] || "").startsWith("reviewDecision") || args.includes("reviewDecision,reviews,comments,statusCheckRollup")) out(read("PITLANE_FAKE_FEEDBACK", {}));
   else out({ state: "OPEN" });
+} else if (args[0] === "pr" && args[1] === "list" && args.includes("--author")) {
+  out(read("PITLANE_FAKE_OWN_PRS", []));
 } else if (args.includes("--head")) {
   const prs = read("PITLANE_FAKE_PRS", {});
   const branch = args[args.indexOf("--head") + 1];

@@ -90,6 +90,23 @@ describe("dispatcher", () => {
     expect(started).toEqual(["b:review:9", "a:A-2", "a:A-1"]);
   });
 
+  it("approved work starts before planning, and a planning start is marked planning", async () => {
+    const { book, dispatcher, started } = setup({
+      maxAgents: 3,
+      start: async (project: { id: string }, ticket: { key: string; approved?: boolean }) => {
+        started.push(`${project.id}:${ticket.key}`);
+        return { ok: true, sessionId: `s-${ticket.key}`, ...(ticket.approved ? {} : { state: "planning" }) };
+      },
+    });
+    book.observe("a", [task("A-1")], { baseline: false });
+    book.observe("a", [task("A-1"), task("A-2")], { baseline: false });
+    book.set("a", "A-2", { approved: true });
+    await dispatcher.tick();
+    expect(started).toEqual(["a:A-2", "a:A-1"]);
+    expect(book.get("a", "A-1").state).toBe("planning");
+    expect(book.get("a", "A-2").state).toBe("working");
+  });
+
   it("a ticket the tracker shows as already under way is set aside, not started", async () => {
     const { book, dispatcher } = setup({ start: async () => ({ ok: false, setAside: { state: "not-started", status: "Ready for QA", stage: "started" } }) });
     book.observe("a", [task("A-1")], { baseline: false });

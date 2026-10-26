@@ -108,6 +108,26 @@ describe("buildListTasksPrompt", () => {
     expect(prompt).toMatch(/only items from SHOP/i);
     expect(prompt).toMatch(/even when they are assigned to the user/i);
   });
+
+  it("the owner's own instructions replace assigned-and-open, and the scope still applies", () => {
+    const prompt = buildListTasksPrompt({ source: "atlassian", instructions: "  unassigned bugs\nlabelled frontend ", scope: "SHOP" });
+    expect(prompt).toContain("- What the owner asked for, in their words: unassigned bugs labelled frontend");
+    expect(prompt).not.toMatch(/assigned to the currently authenticated user/i);
+    expect(prompt).not.toMatch(/Exclude done/);
+    expect(prompt).toMatch(/only items from SHOP/i);
+    expect(prompt).toMatch(/do not create, update, transition, assign, or comment/i);
+  });
+
+  it("long instructions are cut at 500 characters", () => {
+    const prompt = buildListTasksPrompt({ source: "atlassian", instructions: "x".repeat(900) });
+    expect(prompt).toMatch(/in their words: x{499}…\n/);
+  });
+
+  it("reading one ticket by key asks for exactly that item, whoever has it", () => {
+    const prompt = buildListTasksPrompt({ source: "atlassian", key: "SHOP-7", instructions: "unassigned bugs" });
+    expect(prompt).toContain("- Only the item whose key is SHOP-7, whoever it is assigned to and whatever its state.");
+    expect(prompt).not.toMatch(/assigned to the currently authenticated user|in their words|Exclude done/i);
+  });
 });
 
 describe("buildPickTaskPrompt", () => {

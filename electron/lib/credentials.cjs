@@ -12,9 +12,11 @@ const run = (cmd, args) => new Promise((resolve, reject) => {
 async function credentialEnv(project, { exec = run } = {}) {
   const account = project?.github;
   if (!account) return project?.signInNeeded ? { env: {}, warning: "no GitHub login" } : { env: {} };
-  const token = await exec("gh", ["auth", "token", "--hostname", account.host, "--user", account.login]).then((out) => out.trim(), () => "");
-  if (!token) return { env: {}, warning: "no GitHub login" };
   const gitlab = account.kind === "gitlab";
+  // gh knows nothing about GitLab; glab keeps its own login, in the keyring or its config.
+  const ask = gitlab ? exec("glab", ["config", "get", "token", "--host", account.host]) : exec("gh", ["auth", "token", "--hostname", account.host, "--user", account.login]);
+  const token = await ask.then((out) => out.trim(), () => "");
+  if (!token) return { env: {}, warning: gitlab ? "no GitLab login" : "no GitHub login" };
   const variable = gitlab ? "GITLAB_TOKEN" : "GH_TOKEN";
   const key = `credential.https://${account.host}.helper`;
   return {

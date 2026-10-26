@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 // eslint-disable-next-line @typescript-eslint/no-var-requires
-const { addWatch, editWatch, removeWatch, withIds, overlaps, scopeFromHistory, INTERVALS, MODELS } = require("./watchEdits.cjs");
+const { addWatch, editWatch, removeWatch, withIds, overlaps, scopeFromHistory, runNow, isDue, INTERVALS, MODELS } = require("./watchEdits.cjs");
 
 const servers = ["atlassian", "linear-work"];
 
@@ -39,6 +39,38 @@ describe("editing watches", () => {
     expect(moved.lastCheckedAt).toBeUndefined();
     const [same] = editWatch(watches, watches[0].id, { model: "haiku" }, { servers });
     expect(same.baselined).toBe(true);
+  });
+
+  it("a ticket watch can carry the owner's own instructions, trimmed and capped", () => {
+    const [watch] = addWatch([], { kind: "ticket-assigned", server: "atlassian", instructions: "  unassigned bugs  " }, { servers });
+    expect(watch.instructions).toBe("unassigned bugs");
+    const [long] = addWatch([], { kind: "ticket-assigned", server: "atlassian", instructions: "x".repeat(900) }, { servers });
+    expect(long.instructions).toHaveLength(500);
+    const [review] = addWatch([], { kind: "review-requested", instructions: "anything" }, { servers });
+    expect(review.instructions).toBeUndefined();
+  });
+
+  it("a watch with instructions sits beside the plain one on the same tracker; the same instructions twice are refused", () => {
+    const plain = addWatch([], { kind: "ticket-assigned", server: "atlassian" }, { servers });
+    const both = addWatch(plain, { kind: "ticket-assigned", server: "atlassian", instructions: "unassigned bugs" }, { servers });
+    expect(both).toHaveLength(2);
+    expect(() => addWatch(both, { kind: "ticket-assigned", server: "atlassian", instructions: "unassigned bugs" }, { servers })).toThrow(/already/);
+  });
+
+  it("changing the instructions starts the watch fresh; clearing them goes back to assigned to me", () => {
+    const seen = addWatch([], { kind: "ticket-assigned", server: "atlassian" }, { servers }).map((watch: object) => ({ ...watch, baselined: true, lastCheckedAt: 5 }));
+    const [edited] = editWatch(seen, seen[0].id, { instructions: " bugs I reported " }, { servers });
+    expect(edited.instructions).toBe("bugs I reported");
+    expect(edited.baselined).toBeUndefined();
+    expect(edited.lastCheckedAt).toBeUndefined();
+    const [cleared] = editWatch([edited], edited.id, { instructions: "  " }, { servers });
+    expect(cleared.instructions).toBeUndefined();
+  });
+
+  it("projects only overlap when their watches ask the same instructions", () => {
+    const watch = (instructions?: string) => ({ id: "w-1", kind: "ticket-assigned", server: "atlassian", enabled: true, ...(instructions ? { instructions } : {}) });
+    expect(overlaps([{ id: "a", name: "A", watches: [watch("bugs")] }, { id: "b", name: "B", watches: [watch()] }], "a")).toEqual({});
+    expect(overlaps([{ id: "a", name: "A", watches: [watch("bugs")] }, { id: "b", name: "B", watches: [watch("Bugs")] }], "a")).toEqual({ "w-1": ["B"] });
   });
 
   it("an unknown watch is an error, and removing takes out exactly that one", () => {
@@ -80,5 +112,42 @@ describe("editing watches", () => {
     expect(scopeFromHistory(log)).toBe("SHOP");
     expect(scopeFromHistory("ADMIN-1\nADMIN-2\nADMIN-3\nOPS-1\nOPS-2\nOPS-3")).toBe("ADMIN or OPS");
     expect(scopeFromHistory("fix typo\nUTF-8 support")).toBe("");
+  });
+
+
+  it("run now marks one watch, paused or not, to be checked on the next pass", () => {
+    const watches = [
+      { id: "a", kind: "ticket-assigned", server: "atlassian", enabled: false, intervalSeconds: 300, lastCheckedAt: 1 },
+      { id: "b", kind: "review-requested", enabled: true, intervalSeconds: 300, lastCheckedAt: 1 },
+    ];
+    expect(runNow(watches, "a").map((watch: { due?: boolean }) => watch.due)).toEqual([true, undefined]);
+    expect(watches[0]).not.toHaveProperty("due");
+    expect(() => runNow(watches, "nope")).toThrow("No such watch");
+  });
+
+  it("run now with no watch named runs every watch that is on, and says so when none is", () => {
+    const watches = [
+      { id: "a", kind: "ticket-assigned", server: "atlassian", enabled: true, intervalSeconds: 300 },
+      { id: "b", kind: "review-requested", enabled: false, intervalSeconds: 300 },
+      { id: "c", kind: "ticket-assigned", enabled: true, intervalSeconds: 300 },
+    ];
+    expect(runNow(watches).map((watch: { due?: boolean }) => watch.due)).toEqual([true, undefined, undefined]);
+    expect(() => runNow([watches[1]])).toThrow("no watch is on");
+  });
+
+  it("a ticket watch with no tracker cannot run", () => {
+    expect(() => runNow([{ id: "c", kind: "ticket-assigned", enabled: true, intervalSeconds: 300 }], "c")).toThrow("no tracker");
+  });
+
+  it("a watch is due when its interval has passed, when it was never checked, or when it was asked to run now", () => {
+    const watch = { id: "a", kind: "review-requested", enabled: true, intervalSeconds: 300, lastCheckedAt: 1_000_000 };
+    expect(isDue(watch, 1_000_000 + 299_000)).toBe(false);
+    expect(isDue(watch, 1_000_000 + 300_000)).toBe(true);
+    expect(isDue({ ...watch, lastCheckedAt: undefined }, 0)).toBe(true);
+    expect(isDue({ ...watch, due: true }, 1_000_001)).toBe(true);
+    expect(isDue({ ...watch, enabled: false }, 9e12)).toBe(false);
+    expect(isDue({ ...watch, enabled: false, due: true }, 1_000_001)).toBe(true);
+    expect(isDue({ ...watch, kind: "ticket-assigned", due: true }, 1_000_001)).toBe(false);
+    expect(isDue(watch, 1_000_000 + 5_000, 5_000)).toBe(true);
   });
 });

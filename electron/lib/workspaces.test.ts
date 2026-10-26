@@ -43,18 +43,36 @@ describe("workspace slots", () => {
     expect(git(repo, "status", "--porcelain")).toBe("");
   });
 
-  it("a second acquire at limit 1 rejects as busy", async () => {
+  it("there is no limit: each session at once gets its own slot", async () => {
     const workspaces = pool();
-    await workspaces.acquire(project(), { sessionId: "s1", branch: "pitlane/session-aaaa" });
-    await expect(workspaces.acquire(project(), { sessionId: "s2", branch: "pitlane/session-bbbb" })).rejects.toThrow("All 1 workspace is busy");
+    const indexes = [];
+    for (const id of ["s1", "s2", "s3", "s4"]) indexes.push((await workspaces.acquire(project(), { sessionId: id, branch: id })).index);
+    expect(indexes).toEqual([1, 2, 3, 4]);
   });
 
-  it("a higher limit adds a second slot", async () => {
+  it("a freed slot is removed from disk when another clean one is already waiting", async () => {
     const workspaces = pool();
-    await workspaces.acquire(project({ agentLimit: 2 }), { sessionId: "s1", branch: "b1" });
-    const second = await workspaces.acquire(project({ agentLimit: 2 }), { sessionId: "s2", branch: "b2" });
-    expect(second.index).toBe(2);
-    await expect(workspaces.acquire(project({ agentLimit: 2 }), { sessionId: "s3", branch: "b3" })).rejects.toThrow("All 2 workspaces are busy");
+    const first = await workspaces.acquire(project(), { sessionId: "s1", branch: "b1" });
+    const second = await workspaces.acquire(project(), { sessionId: "s2", branch: "b2" });
+    await workspaces.release(project(), first.index, "s1");
+    expect(fs.existsSync(first.path)).toBe(true);
+    await workspaces.release(project(), second.index, "s2");
+    expect(fs.existsSync(second.path)).toBe(false);
+    expect(workspaces.slots(project()).map((slot: { index: number; state: string }) => [slot.index, slot.state])).toEqual([[1, "free"]]);
+    expect(git(repo, "worktree", "list")).not.toContain(second.path);
+    expect((await workspaces.acquire(project(), { sessionId: "s3", branch: "b3" })).index).toBe(1);
+  });
+
+  it("discard throws away what a held slot kept, and refuses one whose agent still runs", async () => {
+    const workspaces = pool();
+    const kept = await workspaces.acquire(project(), { sessionId: "s1", branch: "b1" });
+    const running = await workspaces.acquire(project(), { sessionId: "s2", branch: "b2" });
+    fs.writeFileSync(path.join(kept.path, "wip.txt"), "unfinished\n");
+    expect(await workspaces.release(project(), kept.index, "s1")).toBe("held");
+    await expect(workspaces.discard(project(), running.index, "s2")).rejects.toThrow("still in use");
+    await workspaces.discard(project(), kept.index, "s1");
+    expect(fs.existsSync(path.join(kept.path, "wip.txt"))).toBe(false);
+    expect(workspaces.slots(project()).find((slot: { index: number }) => slot.index === kept.index)).toMatchObject({ state: "free" });
   });
 
   it("release of a clean slot resets it and frees it", async () => {
@@ -151,13 +169,6 @@ describe("workspace slots", () => {
   it("a new branch does not track the trunk, so a push can never land on it", async () => {
     const slot = await pool().acquire(project(), { sessionId: "s1", branch: "b1" });
     expect(() => git(slot.path, "rev-parse", "--abbrev-ref", "@{u}")).toThrow();
-  });
-
-  it("the limit counts busy slots, even when more slots exist", async () => {
-    const workspaces = pool();
-    for (const id of ["s1", "s2", "s3"]) await workspaces.acquire(project({ agentLimit: 3 }), { sessionId: id, branch: id });
-    for (const index of [2, 3]) await workspaces.release(project({ agentLimit: 3 }), index, `s${index}`);
-    await expect(workspaces.acquire(project({ agentLimit: 1 }), { sessionId: "s4", branch: "s4" })).rejects.toThrow("All 1 workspace is busy");
   });
 
   it("reconcile frees busy slots whose session is no longer running", async () => {

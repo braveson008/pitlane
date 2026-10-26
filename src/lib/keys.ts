@@ -1,13 +1,19 @@
-export type HomeAction = "open" | "new" | "theme" | "help" | "up" | "down" | "park" | "limit" | "changes" | "watches" | "openPr" | "stop" | "clear" | "assigned" | "update";
+export type HomeAction = "open" | "new" | "theme" | "help" | "up" | "down" | "park" | "delete" | "changes" | "watches" | "openPr" | "stop" | "clear" | "assigned" | "update" | "runWatches";
 
 const HOME: Record<string, HomeAction> = {
-  Enter: "open", n: "new", t: "theme", "?": "help", j: "down", k: "up", ArrowDown: "down", ArrowUp: "up", x: "park", L: "limit", c: "changes", w: "watches", p: "openPr", s: "stop", C: "clear", a: "assigned", U: "update",
+  Enter: "open", n: "new", t: "theme", "?": "help", j: "down", k: "up", ArrowDown: "down", ArrowUp: "up", x: "park", X: "delete", c: "changes", w: "watches", p: "openPr", s: "stop", C: "clear", a: "assigned", U: "update", r: "runWatches",
 };
 
 /** Home screen keys are single keys; chords belong to the system and the session view. */
 export function homeKey(event: Pick<KeyboardEvent, "key" | "metaKey" | "ctrlKey" | "altKey">): HomeAction | null {
   if (event.metaKey || event.ctrlKey || event.altKey) return null;
   return HOME[event.key] ?? null;
+}
+
+/** ⌘1 to ⌘9 switch to the project in that place in the title bar, from any screen. */
+export function projectKey(event: Pick<KeyboardEvent, "key" | "metaKey" | "ctrlKey" | "altKey">): number | null {
+  if (!event.metaKey || event.ctrlKey || event.altKey || !/^[1-9]$/.test(event.key)) return null;
+  return Number(event.key) - 1;
 }
 
 export type SessionAction = "home" | "switcher" | "prev" | "next" | "changes";
@@ -49,4 +55,13 @@ const DRAFT: Record<string, DraftAction> = { a: "approve", e: "edit", v: "verdic
 export function draftKey(event: Pick<KeyboardEvent, "key" | "metaKey" | "ctrlKey" | "altKey">): DraftAction | null {
   if (event.metaKey || event.ctrlKey || event.altKey) return null;
   return DRAFT[event.key] ?? null;
+}
+
+export type PlanAction = "start" | "discard" | "back" | "down" | "up";
+
+const PLAN: Record<string, PlanAction> = { s: "start", d: "discard", Escape: "back", j: "down", ArrowDown: "down", k: "up", ArrowUp: "up" };
+
+export function planKey(event: Pick<KeyboardEvent, "key" | "metaKey" | "ctrlKey" | "altKey">): PlanAction | null {
+  if (event.metaKey || event.ctrlKey || event.altKey) return null;
+  return PLAN[event.key] ?? null;
 }

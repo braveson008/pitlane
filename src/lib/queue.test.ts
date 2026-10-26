@@ -19,6 +19,16 @@ describe("what starts next", () => {
     expect(ticketLabel({ ...t("A", "queued", 0, "feedback"), status: "In Review" })).toBe("feedback");
     expect(ticketLabel({ ...t("B", "not-started", 0), status: "To Do", elsewhere: "admin" })).toBe("in admin");
     expect(ticketLabel({ ...t("C", "not-started", 0), status: "Ready for QA" })).toBe("Ready for QA");
-    expect(ticketLabel(t("D", "queued", 0))).toBe("ticket");
+    expect(ticketLabel({ ...t("D", "not-started", 0) })).toBe("ticket");
+  });
+
+  it("a queued ticket says whether it is up for a plan or for the work the owner approved", () => {
+    expect(ticketLabel({ ...t("D", "queued", 0), status: "To Do" })).toBe("plan");
+    expect(ticketLabel({ ...t("E", "queued", 0), status: "To Do", approved: true })).toBe("work");
+  });
+
+  it("approved work goes before planning, as the dispatcher starts it", () => {
+    const tickets = [t("OLD", "queued", 1), { ...t("NEW", "queued", 5), approved: true }];
+    expect(upNext(tickets).map((ticket) => ticket.key)).toEqual(["NEW", "OLD"]);
   });
 });

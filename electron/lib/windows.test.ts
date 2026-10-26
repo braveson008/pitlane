@@ -79,4 +79,34 @@ describe("window manager", () => {
     manager.openPicker();
     expect(fake.created).toEqual([null, "a", null]);
   });
+
+  it("switching shows the other project in the same window", () => {
+    const f = fakes();
+    const manager = createWindowManager({ create: f.create, store: f.store });
+    const window = manager.openProject("a");
+    expect(manager.switchTo(window, "b")).toEqual({ window, moved: true });
+    expect(f.created).toEqual(["a"]);
+    expect(manager.windowFor("b")).toBe(window);
+    expect(manager.windowFor("a")).toBeUndefined();
+    expect(f.saved()).toEqual(["b"]);
+    window.close();
+    expect(manager.openIds()).toEqual([]);
+  });
+
+  it("switching to a project that already has its own window brings that window forward", () => {
+    const f = fakes();
+    const manager = createWindowManager({ create: f.create, store: f.store });
+    const a = manager.openProject("a");
+    const b = manager.openProject("b");
+    expect(manager.switchTo(a, "b")).toEqual({ window: b, moved: false });
+    expect(b.focused).toBe(1);
+    expect(manager.openIds()).toEqual(["a", "b"]);
+  });
+
+  it("switching to the project already shown does nothing", () => {
+    const f = fakes();
+    const manager = createWindowManager({ create: f.create, store: f.store });
+    const a = manager.openProject("a");
+    expect(manager.switchTo(a, "a")).toEqual({ window: a, moved: false });
+  });
 });

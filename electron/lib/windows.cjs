@@ -17,11 +17,25 @@ function createWindowManager({ create, store }) {
     const window = create(id);
     open.set(id, window);
     window.on("closed", () => {
-      if (open.get(id) === window) open.delete(id);
+      // The window may show another project by now than the one it was made for.
+      for (const [shown, each] of open) if (each === window) open.delete(shown);
       record();
     });
     record();
     return window;
+  }
+
+  /** Shows another project in this window, or brings forward the window that already shows it. */
+  function switchTo(window, id) {
+    const existing = open.get(id);
+    if (existing) {
+      if (existing !== window) existing.focus();
+      return { window: existing, moved: false };
+    }
+    for (const [shown, each] of open) if (each === window) open.delete(shown);
+    open.set(id, window);
+    record();
+    return { window, moved: true };
   }
 
   function openPicker() {
@@ -37,6 +51,7 @@ function createWindowManager({ create, store }) {
   return {
     openProject,
     openPicker,
+    switchTo,
     restore() {
       const ids = store.get();
       if (!ids.length) return void openPicker();

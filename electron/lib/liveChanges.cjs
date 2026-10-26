@@ -343,6 +343,17 @@ function createLiveChanges({ storePath, git = runGit, watch = watchTree, now = D
         persist();
       }
     },
+    /** Forgets the starting points of every session not in `ids`; returns how many went. */
+    retain(ids) {
+      const gone = Object.keys(baselines).filter((sessionId) => !ids.has(sessionId));
+      for (const sessionId of gone) {
+        live.get(sessionId)?.stop();
+        live.delete(sessionId);
+        delete baselines[sessionId];
+      }
+      if (gone.length) persist();
+      return gone.length;
+    },
     close() {
       for (const entry of live.values()) entry.stop();
       live.clear();

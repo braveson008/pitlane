@@ -71,4 +71,13 @@ export async function assertNothingCut(page, where) {
     .filter((element) => element.scrollWidth > element.clientWidth + 1)
     .map((element) => element.textContent));
   if (cut.length) throw new Error(`${where}: text cut short: ${JSON.stringify(cut)}`);
+  // A short label wrapping over several lines has been squeezed into a column too narrow for it.
+  const squeezed = await page.evaluate(() => [...document.querySelectorAll(".row > span, .row > span > span")]
+    .filter((element) => {
+      const text = element.textContent.trim();
+      const line = parseFloat(getComputedStyle(element).lineHeight) || 20;
+      return text.length > 2 && text.length < 40 && !/\s/.test(text) && element.getBoundingClientRect().height > line * 1.5;
+    })
+    .map((element) => element.textContent));
+  if (squeezed.length) throw new Error(`${where}: text squeezed into a narrow column: ${JSON.stringify(squeezed)}`);
 }

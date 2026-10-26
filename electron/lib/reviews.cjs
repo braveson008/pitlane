@@ -14,7 +14,7 @@ function repoSlug(remoteUrl) {
 // Only people with a hand in the repository get an unattended review; anyone else's PR waits for the owner.
 const TRUSTED = new Set(["OWNER", "MEMBER", "COLLABORATOR"]);
 
-const asTask = ({ number, title, url, author, trusted }) => ({
+const asTask = ({ number, title, url, author, trusted, own, head }) => ({
   id: `review:${number}`,
   title,
   url,
@@ -22,22 +22,45 @@ const asTask = ({ number, title, url, author, trusted }) => ({
   status: "",
   group: "",
   updatedAt: "",
-  pr: { number, author, trusted },
+  pr: { number, author, trusted, ...(own ? { own: true, head } : {}) },
 });
 
-/** Open PRs in this repository where the owner is a requested reviewer, as queue items keyed `review:<n>`. */
-async function findReviewRequests({ cwd, kind, env = {}, exec = run }) {
+/** Requested reviews first, then the owner's own PRs not already listed and not on a branch one of Pitlane's tickets owns. */
+function withOwn(requested, own, skipBranches) {
+  const listed = new Set(requested.map((task) => task.pr.number));
+  return [...requested, ...own.filter((task) => !listed.has(task.pr.number) && !skipBranches.has(task.pr.head))];
+}
+
+/** Open PRs in this repository where the owner is a requested reviewer, or the author, as queue items keyed `review:<n>`. */
+async function findReviewRequests({ cwd, kind, env = {}, exec = run, skipBranches = new Set() }) {
   try {
     const remote = await exec("git", ["remote", "get-url", "origin"], { cwd, env });
     if (kind === "gitlab") {
       const list = JSON.parse(await exec("glab", ["mr", "list", "--reviewer=@me", "-F", "json"], { cwd, env }) || "[]");
       // glab's list has no author association; a project's merge requests come from its members.
-      return { ok: true, tasks: list.map((mr) => asTask({ number: mr.iid, title: mr.title, url: mr.web_url, author: mr.author?.username, trusted: true })) };
+      const mine = JSON.parse(await exec("glab", ["mr", "list", "--author=@me", "-F", "json"], { cwd, env }) || "[]");
+      return {
+        ok: true,
+        tasks: withOwn(
+          list.map((mr) => asTask({ number: mr.iid, title: mr.title, url: mr.web_url, author: mr.author?.username, trusted: true })),
+          mine.map((mr) => asTask({ number: mr.iid, title: mr.title, url: mr.web_url, author: mr.author?.username, trusted: true, own: true, head: mr.source_branch })),
+          skipBranches,
+        ),
+      };
     }
     const slug = repoSlug(remote);
     if (!slug) return { ok: false, error: "the origin remote is not a GitHub repository" };
     const list = JSON.parse(await exec("gh", ["search", "prs", "--review-requested=@me", "--state=open", "--repo", slug, "--json", "number,title,url,author,authorAssociation", "--limit", "30"], { cwd, env }) || "[]");
-    return { ok: true, tasks: list.map((pr) => asTask({ number: pr.number, title: pr.title, url: pr.url, author: pr.author?.login, trusted: TRUSTED.has(pr.authorAssociation) })) };
+    // `gh search prs` has no branch names; `gh pr list` does, and the owner's own PRs need theirs.
+    const mine = JSON.parse(await exec("gh", ["pr", "list", "--author", "@me", "--state", "open", "--repo", slug, "--json", "number,title,url,author,headRefName", "--limit", "30"], { cwd, env }) || "[]");
+    return {
+      ok: true,
+      tasks: withOwn(
+        list.map((pr) => asTask({ number: pr.number, title: pr.title, url: pr.url, author: pr.author?.login, trusted: TRUSTED.has(pr.authorAssociation) })),
+        mine.map((pr) => asTask({ number: pr.number, title: pr.title, url: pr.url, author: pr.author?.login, trusted: true, own: true, head: pr.headRefName })),
+        skipBranches,
+      ),
+    };
   } catch (error) {
     return { ok: false, error: error.message };
   }

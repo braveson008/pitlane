@@ -51,6 +51,21 @@ describe("tracker poll", () => {
     expect(calls[0].input).toContain("Only items from SHOP project");
   });
 
+  it("a watch's instructions go into the poll in place of assigned-to-me", async () => {
+    const { calls, run } = runner({ ok: true, stdout: envelope([]) });
+    await pollAssigned({ cwd: "/repo", server: "atlassian", instructions: "tickets where I'm mentioned", run });
+    expect(calls[0].input).toContain("in their words: tickets where I'm mentioned");
+    expect(calls[0].input).not.toMatch(/assigned to the currently authenticated user/);
+  });
+
+  it("reading a ticket asks for that key alone, so one a custom watch found can be read too", async () => {
+    const { calls, run } = runner({ ok: true, stdout: envelope([{ id: "SHOP-7", title: "Bug", url: "https://x/SHOP-7", status: "To Do" }]) });
+    const ticket = await readTicket({ cwd: "/repo", server: "atlassian", key: "SHOP-7", run });
+    expect(ticket).toMatchObject({ id: "SHOP-7" });
+    expect(calls[0].input).toContain("Only the item whose key is SHOP-7");
+    expect(calls[0].input).not.toMatch(/assigned to the currently authenticated user/);
+  });
+
   it("poll parses tickets from Claude's JSON envelope", async () => {
     const { run } = runner({ ok: true, stdout: envelope([{ id: "SHOP-1", title: "Fix it", url: "https://x/SHOP-1", status: "To Do" }]) });
     const result = await pollAssigned({ cwd: "/repo", server: "atlassian", run });

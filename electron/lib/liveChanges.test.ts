@@ -49,6 +49,15 @@ afterEach(() => {
 });
 
 describe("live changes", () => {
+  it("keeps only the starting points of sessions that still exist", async () => {
+    const changes = hub();
+    await changes.start("s1", repo);
+    await changes.start("s2", repo);
+    expect(changes.retain(new Set(["s2"]))).toBe(1);
+    const saved = JSON.parse(fs.readFileSync(store, "utf8"));
+    expect(Object.keys(saved)).toEqual(["s2"]);
+  });
+
   it("shows only what changed after the session started, including new, deleted and committed work", async () => {
     const changes = hub();
     await changes.start("s1", repo);

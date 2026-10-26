@@ -26,6 +26,7 @@ describe("review drafts", () => {
     write({ summary: "Left over from another PR.", verdict: "approve", comments: [] });
     expect(readDraft(slot, changed, { since: Date.now() + 60_000 })).toEqual({ ok: false, error: "the review file is older than this review" });
     expect(readDraft(slot, changed, { since: Date.now() - 60_000 }).ok).toBe(true);
+    expect(readDraft(slot, changed, { own: true }).draft.verdict).toBe("comment");
   });
 
   it("comments off the diff are kept but marked", () => {
@@ -81,6 +82,15 @@ describe("review drafts", () => {
     const post = calls.find((call) => call.cmd === "gh" && call.args[0] === "api")!;
     expect(post.args).toEqual(["api", "repos/acme/shop/pulls/42/reviews", "-X", "POST", "--input", "-"]);
     expect(JSON.parse(post.input!)).toEqual({ commit_id: "abc123", event: "REQUEST_CHANGES", body: "One nit.", comments: [{ path: "src/cart.ts", line: 11, side: "RIGHT", body: "Rename." }] });
+  });
+
+  it("a review of the owner's own PR is posted as a comment, whatever the verdict", async () => {
+    const { calls, exec } = recording({ "gh pr view 50": '{"state":"OPEN"}', "gh api": "{}" });
+    await postDraft({ cwd: "/s", kind: "github", repo: "acme/shop", pr: { number: 50, own: true }, draft: { ...draft, verdict: "approve" }, sha: "abc", exec });
+    expect(JSON.parse(calls.find((call) => call.args[0] === "api")!.input!).event).toBe("COMMENT");
+    const gitlab = recording({ "glab mr view 9": '{"state":"opened"}' });
+    await postDraft({ cwd: "/s", kind: "gitlab", pr: { number: 9, own: true }, draft: { ...draft, verdict: "approve" }, sha: "abc", exec: gitlab.exec });
+    expect(gitlab.calls.some((call) => call.args[1] === "approve")).toBe(false);
   });
 
   it("a merged PR is not posted to", async () => {

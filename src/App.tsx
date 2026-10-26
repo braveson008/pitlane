@@ -3,8 +3,10 @@ import { api, type Project, type ProjectStatus, type Session, type Slot, type Ti
 import { Home } from "./screens/Home";
 import { SessionView } from "./screens/SessionView";
 import { Switcher } from "./screens/Switcher";
+import { ProjectTabs } from "./screens/ProjectTabs";
 import { Changes } from "./screens/Changes";
 import { Draft } from "./screens/Draft";
+import { Plan } from "./screens/Plan";
 import { Watches } from "./screens/Watches";
 import { orderSessions } from "./lib/sessionOrder";
 import type { SessionAction } from "./lib/keys";
@@ -44,6 +46,7 @@ function ProjectWindow({ id }: { id: string }) {
   const [openSession, setOpenSession] = useState<string | null>(null);
   const [switching, setSwitching] = useState(false);
   const [draftFor, setDraftFor] = useState<string | null>(null);
+  const [planFor, setPlanFor] = useState<string | null>(null);
   const [editingWatches, setEditingWatches] = useState(false);
   const [changesFor, setChangesFor] = useState<{ sessionId: string; from: "home" | "session" } | null>(null);
 
@@ -75,6 +78,8 @@ function ProjectWindow({ id }: { id: string }) {
 
   const drafting = draftFor ? tickets.find((ticket) => ticket.key === draftFor && ticket.state === "review-ready") : undefined;
   if (drafting) return <Draft key={drafting.key} project={project} ticket={drafting} onBack={() => setDraftFor(null)} />;
+  const planning = planFor ? tickets.find((ticket) => ticket.key === planFor && ticket.state === "plan-ready") : undefined;
+  if (planning) return <Plan key={planning.key} project={project} ticket={planning} onBack={() => setPlanFor(null)} />;
 
   if (editingWatches) return <Watches project={project} onProject={setProject} onBack={() => setEditingWatches(false)} />;
 
@@ -120,7 +125,7 @@ function ProjectWindow({ id }: { id: string }) {
   if (openSession) return <header className="statusline"><span className="lo">Starting…</span></header>;
   return (
     <>
-      <Home project={project} theme={theme} sessions={sessions} workspaces={workspaces} tickets={tickets} pausedUntil={pausedUntil} paused={switching} onMissing={() => setStatus("missing")} onWatches={() => setEditingWatches(true)} onOpen={(session) => setOpenSession(session.id)} onChanges={(session) => setChangesFor({ sessionId: session.id, from: "home" })} onDraft={(ticket) => setDraftFor(ticket.key)} onProject={setProject} />
+      <Home project={project} theme={theme} sessions={sessions} workspaces={workspaces} tickets={tickets} pausedUntil={pausedUntil} paused={switching} onMissing={() => setStatus("missing")} onWatches={() => setEditingWatches(true)} onOpen={(session) => setOpenSession(session.id)} onChanges={(session) => setChangesFor({ sessionId: session.id, from: "home" })} onDraft={(ticket) => setDraftFor(ticket.key)} onPlan={(ticket) => setPlanFor(ticket.key)} onProject={setProject} />
       {switcher}
     </>
   );
@@ -160,7 +165,7 @@ function PickerWindow() {
 export function App() {
   return (
     <div className="frame">
-      <div className="titlebar" />
+      <div className="titlebar">{projectId ? <ProjectTabs currentId={projectId} /> : null}</div>
       {projectId ? <ProjectWindow id={projectId} /> : <PickerWindow />}
     </div>
   );

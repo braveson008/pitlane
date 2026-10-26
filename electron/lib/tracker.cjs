@@ -40,7 +40,7 @@ function runClaude(args, input, { cwd, timeoutMs }) {
   });
 }
 
-async function ask({ cwd, server, scope, model = "sonnet", run = runClaude, query, brief }) {
+async function ask({ cwd, server, scope, model = "sonnet", run = runClaude, key, instructions, brief }) {
   if (!["atlassian", "linear"].includes(trackerSourceFamily(server))) {
     return { ok: false, error: `${server} is not a Jira or Linear MCP server` };
   }
@@ -48,7 +48,7 @@ async function ask({ cwd, server, scope, model = "sonnet", run = runClaude, quer
   // dontAsk refuses every tool not explicitly allowed, whatever default mode the owner set (auto would pass them
   // to a classifier); no session persistence, or each poll would add a conversation to the project's resume list.
   const args = ["-p", "--output-format", "json", "--model", model, "--permission-mode", "dontAsk", "--no-session-persistence", "--disallowedTools", ...DENIED, "--allowedTools", ...allowed];
-  const prompt = `Use only the explicitly allowed read-only tools in MCP namespace ${server}.\n\n${buildListTasksPrompt({ source: server, brief, scope: scope || "", ...(query ? { query, limit: 3 } : {}) })}`;
+  const prompt = `Use only the explicitly allowed read-only tools in MCP namespace ${server}.\n\n${buildListTasksPrompt({ source: server, brief, scope: scope || "", instructions: instructions || "", ...(key ? { key, limit: 3 } : {}) })}`;
   const result = await run(args, prompt, { cwd, timeoutMs: TIMEOUT_MS });
   if (!result.ok) return { ok: false, error: String(result.stderr || "Claude did not answer").trim().split("\n").pop() };
   let reply = result.stdout;
@@ -67,9 +67,9 @@ function pollAssigned(options) {
   return ask({ ...options, brief: true });
 }
 
-/** One ticket in full, with its description verbatim, for the agent that will work on it. */
+/** One ticket in full, with its description verbatim, for the agent that will work on it. Asked for by key alone: a watch with its own instructions finds tickets that are not assigned to the owner. */
 async function readTicket({ key, ...options }) {
-  const result = await ask({ ...options, query: key, brief: false });
+  const result = await ask({ ...options, key, brief: false });
   if (!result.ok) return null;
   return result.tasks.find((task) => String(task.id).toLowerCase() === String(key).toLowerCase()) || null;
 }

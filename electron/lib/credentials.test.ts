@@ -24,13 +24,20 @@ describe("per-project credentials", () => {
     });
   });
 
-  it("GitLab projects get GITLAB_TOKEN with oauth2", async () => {
-    const { env } = await credentialEnv({ github: { host: "gitlab.com", kind: "gitlab", login: "someone" } }, { exec: tokenFor([]) });
+  it("GitLab projects get GITLAB_TOKEN with oauth2, from glab's own login", async () => {
+    const calls: string[][] = [];
+    const { env } = await credentialEnv({ github: { host: "gitlab.com", kind: "gitlab", login: "someone" } }, { exec: tokenFor(calls) });
+    expect(calls).toEqual([["glab", "config", "get", "token", "--host", "gitlab.com"]]);
     expect(env.GITLAB_TOKEN).toBe("tok_123");
     expect(env.GH_TOKEN).toBeUndefined();
     expect(env.GIT_CONFIG_VALUE_0).toBe("");
     expect(env.GIT_CONFIG_KEY_1).toBe("credential.https://gitlab.com.helper");
     expect(env.GIT_CONFIG_VALUE_1).toBe("!f(){ echo username=oauth2; echo password=$GITLAB_TOKEN; }; f");
+  });
+
+  it("a GitLab project without a glab login says GitLab", async () => {
+    const exec = async () => "";
+    expect(await credentialEnv({ github: { host: "gitlab.com", kind: "gitlab", login: "x" } }, { exec })).toEqual({ env: {}, warning: "no GitLab login" });
   });
 
   it("a missing gh gives a warning, not an error", async () => {

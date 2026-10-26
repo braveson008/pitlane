@@ -11,7 +11,8 @@ const { runGit } = require("./lib/git.cjs");
 const { credentialEnv, reviewerEnv } = require("./lib/credentials.cjs");
 const { carryMovedProjects } = require("./lib/projectMoves.cjs");
 const { startUpdates, readUpdateConfig } = require("./lib/updates.cjs");
-const { addWatch, editWatch, removeWatch, withIds, overlaps, scopeFromHistory } = require("./lib/watchEdits.cjs");
+const { needsYou } = require("./lib/attention.cjs");
+const { addWatch, editWatch, removeWatch, runNow, isDue, withIds, overlaps, scopeFromHistory } = require("./lib/watchEdits.cjs");
 const { ensureClaudeTrust } = require("./lib/claudeTrust.cjs");
 const { hookSettings } = require("./lib/agentEvents.cjs");
 const { createTicketBook } = require("./lib/tickets.cjs");
@@ -26,8 +27,9 @@ const { reviewPrompt } = require("./lib/reviewPrompt.cjs");
 const { readDraft, changedLines, postDraft } = require("./lib/reviewDraft.cjs");
 const { repoSlug } = require("./lib/reviews.cjs");
 const { readFeedback, githubLogin } = require("./lib/feedback.cjs");
-const { afterTurn, isTerminalReply } = require("./lib/ticketFlow.cjs");
-const { watchAgentEvents } = require("./lib/agentEvents.cjs");
+const { afterTurn, afterPlanTurn, wantsWork, ownsPlan, afterRestart, isTerminalReply } = require("./lib/ticketFlow.cjs");
+const { planPrompt, readPlan } = require("./lib/plan.cjs");
+const { watchAgentEvents, pruneAgentEvents } = require("./lib/agentEvents.cjs");
 const { Notification } = require("electron");
 const os = require("node:os");
 const fs = require("node:fs");
@@ -103,44 +105,40 @@ function loadRenderer(window, query = {}) {
 }
 
 const settings = () => readJson(dataFile("settings.json"), {});
-const themeOf = (project) => project?.theme || settings().defaultTheme || "vt220";
-const BACKGROUND = { vt220: "#0a0a08", acme: "#ffffea", "night-city": "#00000000", "green-screen": "#040a05", daylight: "#fafafa", synthwave: "#1a1033", midnight: "#0e1320" };
-const pendingBounds = new Map();
+const BACKGROUND = { "github-dark": "#0d1117", nord: "#2e3440", "one-dark": "#282c34", dracula: "#282a36", "tokyo-night": "#1a1b26" };
+// A theme saved by an earlier version may be gone; the same fallback as themeFor in src/theme/themes.ts.
+const themeOf = (project) => [project?.theme, settings().defaultTheme].find((id) => Object.hasOwn(BACKGROUND, id || "")) || "github-dark";
 
 function createWindow(projectId) {
   const project = projectId ? registry.get(projectId) : null;
   const theme = themeOf(project);
-  // Night City's cut corners need a see-through window without the system shadow, which would draw the square.
-  const nightCity = theme === "night-city";
-  const bounds = pendingBounds.get(projectId);
-  pendingBounds.delete(projectId);
   const window = new BrowserWindow({
     width: project ? 1100 : 720,
     height: project ? 720 : 520,
-    ...(bounds || {}),
     minWidth: 640,
     minHeight: 420,
     title: project ? project.name : "Pitlane",
     backgroundColor: BACKGROUND[theme],
     titleBarStyle: "hidden",
     trafficLightPosition: { x: 12, y: 8 },
-    transparent: nightCity,
-    hasShadow: !nightCity,
     webPreferences: { preload: path.join(__dirname, "preload.cjs"), contextIsolation: true, sandbox: false },
   });
   guardNavigation(window.webContents);
   const contentsId = window.webContents.id;
-  window.webContents.once("destroyed", () => {
-    for (const map of [attachments, liveSubscriptions]) {
-      for (const [key, stop] of map) {
-        if (!key.startsWith(`${contentsId}:`)) continue;
-        stop();
-        map.delete(key);
-      }
-    }
-  });
+  window.webContents.once("destroyed", () => dropSubscriptions(contentsId));
   void loadRenderer(window, projectId ? { project: projectId } : {});
   return window;
+}
+
+/** Stops sending a window's page the terminals and Changes it was watching. */
+function dropSubscriptions(contentsId) {
+  for (const map of [attachments, liveSubscriptions]) {
+    for (const [key, stop] of map) {
+      if (!key.startsWith(`${contentsId}:`)) continue;
+      stop();
+      map.delete(key);
+    }
+  }
 }
 
 function rebuildDockMenu() {
@@ -197,9 +195,17 @@ function workspaceList(projectId) {
 function broadcastSessions(projectId) {
   const window = windows.windowFor(projectId);
   if (window && !window.isDestroyed()) window.webContents.send("sessions:changed", { projectId, sessions: sessions.list(projectId), workspaces: workspaceList(projectId) });
+  broadcastAttention();
 }
 
-const busyMessage = (message) => (/busy$/.test(message) ? `${message} — park one (x) or raise the limit (L)` : message);
+/** For each project, how many things wait on the owner: what the title-bar tabs show. */
+const attention = () => Object.fromEntries(registry.list().map((project) => [project.id, needsYou({ tickets: tickets.list(project.id), sessions: sessions.list(project.id) })]));
+
+// Every window's tabs show every project, so each change goes to all of them.
+function broadcastAttention() {
+  const counts = attention();
+  for (const window of BrowserWindow.getAllWindows()) if (!window.isDestroyed()) window.webContents.send("projects:attention", counts);
+}
 
 function detach(webContents, id) {
   const key = `${webContents.id}:${id}`;
@@ -209,12 +215,12 @@ function detach(webContents, id) {
 
 /**
  * Starts an agent in a workspace slot on `branch`: the one way a session begins, for `n` and for tickets.
- * Returns the session, `{ busy, error }` when every slot is taken, or `{ error }`.
+ * Returns the session, or `{ error }`.
  */
 // A review agent reads and writes a draft; it has no reason to talk to the host or fetch anything.
 const REVIEW_DENIED = ["Bash(gh:*)", "Bash(glab:*)", "Bash(git push:*)", "Bash(curl:*)", "Bash(wget:*)"];
 
-async function startSession(project, { id = randomUUID(), agent, branch, review, initialPrompt, ticketKey, extraArgs = [], name }) {
+async function startSession(project, { id = randomUUID(), agent, branch, review, detached, initialPrompt, ticketKey, extraArgs = [], name }) {
   // A pty started in a folder that is gone prints nothing and exits 1, which reads as a broken agent.
   if ((await registry.status(project.id)) !== "ok") return { error: "Folder not found", missing: true };
   if (project.localFiles === undefined) {
@@ -225,21 +231,23 @@ async function startSession(project, { id = randomUUID(), agent, branch, review,
   // Agents never work in the owner's checkout: each session takes a workspace slot on its own branch.
   let slot;
   try {
-    slot = review
-      ? await pool.acquireDetached(project, { sessionId: id, fetchRef: review.fetchRef, baseRef: review.baseRef, env: (await credentialEnv(project)).env })
+    const at = review || detached;
+    slot = at
+      ? await pool.acquireDetached(project, { sessionId: id, fetchRef: at.fetchRef, baseRef: at.baseRef, env: (await credentialEnv(project)).env })
       : await pool.acquire(project, { sessionId: id, branch });
   } catch (error) {
-    return /busy$/.test(error.message) ? { busy: true, error: error.message } : { error: error.message };
+    return { error: error.message };
   }
   let credentials;
   const args = [...extraArgs];
   const env = {};
   try {
-    if (review) {
+    if (review || detached) {
       // A PR that ships its own review draft would be putting words in the owner's mouth.
-      if (await runGit(slot.path, ["ls-files", "--", ".pitlane"])) throw new Error("this PR contains a .pitlane/ folder — review it yourself");
+      if (await runGit(slot.path, ["ls-files", "--", ".pitlane"])) throw new Error(review ? "this PR contains a .pitlane/ folder — review it yourself" : "the trunk contains a .pitlane/ folder — remove it before planning");
       fs.rmSync(path.join(slot.path, ".pitlane"), { recursive: true, force: true });
-      // The owner's .env and tokens stay out of a teammate's code: no local files, no host credentials.
+      // The owner's .env and tokens stay out of a teammate's code, and out of a plan nobody approved yet:
+      // no local files, no host credentials, nothing that pushes or posts.
       const emptyDir = dataFile("reviewer-config");
       fs.mkdirSync(emptyDir, { recursive: true });
       credentials = { env: reviewerEnv({ emptyDir }) };
@@ -333,7 +341,6 @@ async function startReview(project, item) {
     extraArgs: UNATTENDED[agent],
     name: `${item.key} ${item.title}`,
   });
-  if (result.busy) return { ok: false, busy: true };
   if (result.error) return { ok: false, error: result.error === "confirm-local-files" ? "confirm which local files to copy first (press n once)" : result.error };
   if (result.state === "failed") return { ok: false, error: result.error };
   return { ok: true, sessionId: result.id };
@@ -345,6 +352,44 @@ function heldElsewhere(projectId, key) {
   return holder ? holder.name : null;
 }
 
+/** The ticket in full from the tracker, or why it should not start: unreadable, moved on, or another project's. */
+async function currentTicket(project, ticket) {
+  // The watch that found it knows which tracker to ask; otherwise the one that is on.
+  const watch = withIds(project.watches).filter((candidate) => candidate.kind === "ticket-assigned" && candidate.server)
+    .sort((a, b) => Number(Boolean(ticket.foundBy?.includes(b.id))) - Number(Boolean(ticket.foundBy?.includes(a.id))) || Number(b.enabled) - Number(a.enabled))[0];
+  const full = watch ? await readTicket({ cwd: project.path, server: watch.server, scope: watch.scope, key: ticket.key, model: watch.model }).catch(() => null) : null;
+  // Without its description an unattended agent would work from the title alone.
+  if (watch && !full) return { stop: { ok: false, error: "could not read the ticket from the tracker" } };
+  // The poll may be minutes old; a ticket that has moved on since is not started unless the owner chose it.
+  if (!ticket.chosen && full?.stage && full.stage !== "todo") return { stop: { ok: false, setAside: { state: full.stage === "done" ? "dropped" : "not-started", status: full.status, stage: full.stage } } };
+  const elsewhere = !ticket.chosen && heldElsewhere(project.id, ticket.key);
+  if (elsewhere) return { stop: { ok: false, setAside: { state: "not-started", elsewhere } } };
+  return { full };
+}
+
+// Planning sessions, so their end is judged as a plan whatever the ticket's state says meanwhile.
+const planningSessions = new Set();
+
+/** Starts a planning agent on a ticket, at the trunk on no branch: it writes a plan and changes nothing the owner keeps. */
+async function startPlanning(project, ticket) {
+  const { full, stop } = await currentTicket(project, ticket);
+  if (stop) return stop;
+  const agent = project.leadAgent === "codex" ? "codex" : "claude";
+  const result = await startSession(project, {
+    agent,
+    detached: { fetchRef: project.trunk },
+    initialPrompt: planPrompt({ ticket: { ...ticket, description: full?.description || ticket.description, url: full?.url || ticket.url } }),
+    ticketKey: ticket.key,
+    extraArgs: UNATTENDED[agent],
+    name: `${ticket.key} plan`,
+  });
+  if (result.error === "confirm-local-files") return { ok: false, error: "confirm which local files to copy first (press n once)" };
+  if (result.error) return { ok: false, error: result.error };
+  if (result.state === "failed") return { ok: false, error: result.error };
+  planningSessions.add(result.id);
+  return { ok: true, sessionId: result.id, state: "planning" };
+}
+
 /** Starts the project's lead agent on one ticket: its branch (adopted if one exists), the ticket in full, the workflow. */
 async function startTicket(project, ticket) {
   const remote = await remoteBranches(project.path);
@@ -352,14 +397,8 @@ async function startTicket(project, ticket) {
   const found = adoptableBranch({ key: ticket.key, remoteBranches: remote });
   const adopted = found && /^[A-Za-z0-9._/-]+$/.test(found) ? found : null;
   const branch = adopted || ticketBranch({ key: ticket.key, title: ticket.title, remoteBranches: remote });
-  const watch = (project.watches || []).filter((candidate) => candidate.kind === "ticket-assigned" && candidate.server).sort((a, b) => Number(b.enabled) - Number(a.enabled))[0];
-  const full = watch ? await readTicket({ cwd: project.path, server: watch.server, scope: watch.scope, key: ticket.key, model: watch.model }).catch(() => null) : null;
-  // Without its description an unattended agent would work from the title alone.
-  if (watch && !full) return { ok: false, error: "could not read the ticket from the tracker" };
-  // The poll may be minutes old; a ticket that has moved on since is not started unless the owner chose it.
-  if (!ticket.chosen && full?.stage && full.stage !== "todo") return { ok: false, setAside: { state: full.stage === "done" ? "dropped" : "not-started", status: full.status, stage: full.stage } };
-  const elsewhere = !ticket.chosen && heldElsewhere(project.id, ticket.key);
-  if (elsewhere) return { ok: false, setAside: { state: "not-started", elsewhere } };
+  const { full, stop } = await currentTicket(project, ticket);
+  if (stop) return stop;
   // The branch may still be in a slot an earlier attempt left held; its work is kept as a local commit first.
   const holding = pool.slots(project).find((slot) => slot.state === "held" && slot.branch === branch);
   if (holding) await pool.park(project, holding.index, holding.sessionId).catch(() => {});
@@ -372,9 +411,9 @@ async function startTicket(project, ticket) {
     adopted: Boolean(adopted),
     host: hostKind(project, remotes),
     feedback: ticket.priority === "feedback" ? ticket.feedback : "",
+    plan: ticket.plan || "",
   });
   const result = await startSession(project, { agent, branch, initialPrompt: prompt, ticketKey: ticket.key, extraArgs: UNATTENDED[agent], name: `${ticket.key} ${ticket.title}` });
-  if (result.busy) return { ok: false, busy: true };
   if (result.error === "confirm-local-files") return { ok: false, error: "confirm which local files to copy first (press n once)" };
   if (result.error) return { ok: false, error: result.error };
   if (result.state === "failed") return { ok: false, error: result.error };
@@ -386,6 +425,7 @@ async function startTicket(project, ticket) {
 function broadcastTickets(projectId) {
   const window = windows.windowFor(projectId);
   if (window && !window.isDestroyed()) window.webContents.send("tickets:changed", { projectId, tickets: tickets.list(projectId), pausedUntil: dispatcher.pausedUntil() });
+  broadcastAttention();
 }
 
 const runningTicketSessions = () => registry.list().reduce((count, project) => count + sessions.list(project.id).filter((session) => session.ticketKey && session.state === "running").length, 0);
@@ -463,7 +503,7 @@ async function reviewDraftReady(project, session, { final }) {
   const slot = pool.slots(project).find((candidate) => candidate.sessionId === session.id);
   const base = slot?.base || (await pool.base(project));
   const changed = await changedLines(session.cwd, base).catch(() => new Map());
-  const result = readDraft(session.cwd, changed, { since: session.createdAt });
+  const result = readDraft(session.cwd, changed, { since: session.createdAt, own: Boolean(tickets.get(project.id, session.ticketKey)?.pr?.own) });
   if (!result.ok) {
     if (final) setTicket(project.id, session.ticketKey, { state: "needs-you", reason: result.error });
     return false;
@@ -474,11 +514,33 @@ async function reviewDraftReady(project, session, { final }) {
   return true;
 }
 
+/** A planning session's plan, once written: the owner reads it next, and the idle agent is ended. */
+async function planReady(project, session, { final }) {
+  const key = session.ticketKey;
+  // No await between this check and the update below: the Stop hook and the exit can both get here.
+  if (!ownsPlan(tickets.get(project.id, key), session.id)) return;
+  const plan = readPlan(session.cwd, { since: session.createdAt });
+  const decision = afterPlanTurn({ planned: plan.ok, tail: sessions.tail(session.id, 4096) });
+  if (decision?.pause) {
+    pauseForUsageLimit(project, key);
+    if (session.state === "running") sessions.stop(session.id);
+    return;
+  }
+  if (!decision) {
+    if (final) setTicket(project.id, key, { state: "needs-you", reason: session.stopped ? "you stopped its agent" : plan.error });
+    return;
+  }
+  setTicket(project.id, key, { state: "plan-ready", plan: plan.plan, plannedAt: Date.now(), reason: undefined });
+  notify(`${key} plan ready`, plan.plan.split("\n").find((line) => line.trim())?.replace(/^#+\s*/, "").slice(0, 120) || "", { projectId: project.id });
+  if (session.state === "running") sessions.stop(session.id);
+}
+
 /** The end of one of the agent's turns (Claude's Stop hook): an open PR means the ticket's work is done. */
 async function ticketTurnEnded(session) {
   const project = registry.get(session.projectId);
   if (!project || !session.ticketKey || session.state !== "running") return;
   if (session.ticketKey.startsWith("review:")) return void (await reviewDraftReady(project, session, { final: false }));
+  if (planningSessions.has(session.id)) return void (await planReady(project, session, { final: false }));
   const pr = await lookUpPr(project, session.branch);
   const decision = afterTurn({ pr: pr?.url ? pr : null, tail: sessions.tail(session.id, 4096) });
   if (decision) applyTurn(project, session, decision);
@@ -493,6 +555,8 @@ async function ticketSessionEnded(session) {
   const state = tickets.get(project.id, key)?.state;
   if (state === "in-review" || state === "done" || state === "review-ready") return;
   if (key.startsWith("review:")) return void (await reviewDraftReady(project, session, { final: true }));
+  // Its plan was read before the slot was reset; there is no PR to look for.
+  if (planningSessions.delete(session.id)) return;
   const pr = await lookUpPr(project, session.branch);
   const decision = afterTurn({ pr: pr?.url ? pr : null, tail: sessions.tail(session.id, 4096) });
   if (decision) return applyTurn(project, session, decision);
@@ -581,6 +645,9 @@ async function historyScope(project) {
   return scopeFromHistory(log);
 }
 
+/** Branches Pitlane's own tickets work on: their PRs were reviewed before they were pushed. */
+const ticketBranches = (projectId) => new Set(tickets.list(projectId).filter((ticket) => !ticket.key.startsWith("review:") && ticket.branch).map((ticket) => ticket.branch));
+
 let polling = false;
 /** Polls each enabled watch that is due; the first successful poll of a watch only records what is already assigned. */
 async function pollWatches() {
@@ -589,23 +656,22 @@ async function pollWatches() {
   try {
     for (const project of registry.list()) {
       for (const watch of withIds(project.watches)) {
-        if (!watch.enabled || (watch.kind === "ticket-assigned" && !watch.server) || !["ticket-assigned", "review-requested"].includes(watch.kind)) continue;
-        const intervalMs = (E2E && Number(process.env.PITLANE_WATCH_INTERVAL_MS)) || watch.intervalSeconds * 1000;
-        if (watch.lastCheckedAt && Date.now() - watch.lastCheckedAt < intervalMs) continue;
+        if (!isDue(watch, Date.now(), (E2E && Number(process.env.PITLANE_WATCH_INTERVAL_MS)) || undefined)) continue;
         const result = watch.kind === "review-requested"
-          ? await findReviewRequests({ cwd: project.path, kind: hostKind(project, await runGit(project.path, ["remote", "-v"]).catch(() => "")), env: (await credentialEnv(project)).env })
-          : await pollAssigned({ cwd: project.path, server: watch.server, scope: watch.scope, model: watch.model || "sonnet" });
+          ? await findReviewRequests({ cwd: project.path, kind: hostKind(project, await runGit(project.path, ["remote", "-v"]).catch(() => "")), env: (await credentialEnv(project)).env, skipBranches: ticketBranches(project.id) })
+          : await pollAssigned({ cwd: project.path, server: watch.server, scope: watch.scope, instructions: watch.instructions, model: watch.model || "sonnet" });
         // The poll can take minutes; whatever the owner changed meanwhile (paused it, its interval) is kept.
         // If the owner retargeted the watch meanwhile, this answer is about something it no longer watches.
         const current = withIds(registry.get(project.id)?.watches).map((each) => ({ ...each }));
-        const live = current.find((each) => each.id === watch.id && each.server === watch.server && each.scope === watch.scope);
+        const live = current.find((each) => each.id === watch.id && each.server === watch.server && each.scope === watch.scope && each.instructions === watch.instructions);
         if (!live) continue;
         live.lastCheckedAt = Date.now();
+        delete live.due;
         if (!result.ok) {
           live.lastError = result.error;
         } else {
           delete live.lastError;
-          const outcome = tickets.observe(project.id, result.tasks, { baseline: !live.baselined, kind: watch.kind === "review-requested" ? "review" : "ticket", heldElsewhere: (key) => heldElsewhere(project.id, key) });
+          const outcome = tickets.observe(project.id, result.tasks, { baseline: !live.baselined, kind: watch.kind === "review-requested" ? "review" : "ticket", watchId: watch.id, claimsUnmarked: !watch.instructions, heldElsewhere: (key) => heldElsewhere(project.id, key) });
           live.baselined = true;
           for (const key of outcome.flagged) notify(`${key} needs you`, "It is no longer assigned to you.", { projectId: project.id });
           broadcastTickets(project.id);
@@ -620,7 +686,37 @@ async function pollWatches() {
 
 /** One pass: poll the watches that are due, follow PRs, then start what the queue allows. */
 let ticking = null;
+const TIDY_EVERY_MS = 60 * 60_000;
+const ENDED_KEPT_MS = 24 * 60 * 60_000;
+let tidiedAt = 0;
+
+/** Sessions a slot still holds work for: they stay listed until that work is parked. */
+const heldSessions = (project) => new Set(pool.slots(project).filter((slot) => slot.state === "held").map((slot) => slot.sessionId));
+
+/** Lets go of what belongs to sessions that are gone: their hook event files and Changes starting points. */
+function pruneLeftovers() {
+  const known = new Set(registry.list().flatMap((project) => sessions.list(project.id).map((session) => session.id)));
+  pruneAgentEvents(dataFile("agent-events"), known);
+  liveChanges.retain(known);
+}
+
+/** Ended sessions are cleared a day after they end, and with them what was kept for them. */
+function tidy() {
+  if (Date.now() - tidiedAt < TIDY_EVERY_MS) return;
+  tidiedAt = Date.now();
+  for (const project of registry.list()) {
+    const held = heldSessions(project);
+    sessions.clearEnded(project.id, { keep: (session) => held.has(session.id), before: Date.now() - ENDED_KEPT_MS });
+  }
+  pruneLeftovers();
+}
+
 function watchTick() {
+  try {
+    tidy();
+  } catch (error) {
+    console.log(`[tidy] ${error.message}`);
+  }
   ticking ??= (async () => {
     await pollWatches().catch((error) => console.log(`[watches] ${error.message}`));
     await recheckReviews().catch((error) => console.log(`[reviews] ${error.message}`));
@@ -654,11 +750,11 @@ function registerWatchIpc() {
     const project = registry.get(payload?.id);
     const scope = project && payload?.kind === "ticket-assigned" ? await historyScope(project) : "";
     return withProject(payload, (current, watches) =>
-      registry.update(current.id, { watches: addWatch(watches, { kind: payload?.kind, server: payload?.server, scope }, { servers: trackerServersFor(current) }) }));
+      registry.update(current.id, { watches: addWatch(watches, { kind: payload?.kind, server: payload?.server, scope, instructions: payload?.instructions }, { servers: trackerServersFor(current) }) }));
   });
   ipcMain.handle("watches:edit", (_event, payload) => withProject(payload, (project, watches) => {
     const patch = payload?.patch || {};
-    const edited = editWatch(watches, String(payload?.watchId), { intervalSeconds: patch.intervalSeconds, model: patch.model, server: patch.server, scope: patch.scope }, { servers: trackerServersFor(project) });
+    const edited = editWatch(watches, String(payload?.watchId), { intervalSeconds: patch.intervalSeconds, model: patch.model, server: patch.server, scope: patch.scope, instructions: patch.instructions }, { servers: trackerServersFor(project) });
     return registry.update(project.id, { watches: edited });
   }));
   ipcMain.handle("watches:remove", (_event, payload) => withProject(payload, (project, watches) =>
@@ -673,11 +769,7 @@ function registerWatchIpc() {
     return updated;
   }));
   ipcMain.handle("watches:check", (_event, payload) => withProject(payload, (project, watches) => {
-    const watch = watches.find((each) => each.id === payload?.watchId);
-    if (!watch) throw new Error("No such watch");
-    if (!watch.enabled) throw new Error("switch it on first (space)");
-    delete watch.lastCheckedAt;
-    const updated = registry.update(project.id, { watches });
+    const updated = registry.update(project.id, { watches: runNow(watches, payload?.watchId === undefined ? undefined : String(payload.watchId)) });
     setImmediate(() => void watchTick());
     return updated;
   }));
@@ -691,7 +783,7 @@ function registerWatchIpc() {
     const same = (a, b) => a.path === b.path && a.line === b.line && a.body === b.body;
     const kept = ticket.draft.comments.filter((stored) => draft.comments.some((comment) => comment && same(comment, stored)));
     return setTicket(payload.projectId, ticket.key, {
-      draft: { ...ticket.draft, summary: draft.summary.slice(0, 20_000), verdict: ["approve", "comment", "request-changes"].includes(draft.verdict) ? draft.verdict : "comment", comments: kept },
+      draft: { ...ticket.draft, summary: draft.summary.slice(0, 20_000), verdict: !ticket.pr?.own && ["approve", "comment", "request-changes"].includes(draft.verdict) ? draft.verdict : "comment", comments: kept },
     });
   });
   ipcMain.handle("reviews:post", async (_event, payload) => {
@@ -730,6 +822,21 @@ function registerWatchIpc() {
     void dispatch();
     return { ok: true };
   });
+  ipcMain.handle("tickets:approve-plan", (_event, payload) => {
+    const projectId = String(payload?.projectId || "");
+    const ticket = tickets.get(projectId, String(payload?.key || ""));
+    if (!ticket || ticket.state !== "plan-ready") return failure("No plan to start");
+    setTicket(projectId, ticket.key, { state: "queued", approved: true, chosen: true, reason: undefined });
+    void dispatch();
+    return { ok: true };
+  });
+  ipcMain.handle("tickets:discard-plan", (_event, payload) => {
+    const projectId = String(payload?.projectId || "");
+    const ticket = tickets.get(projectId, String(payload?.key || ""));
+    if (!ticket || ticket.state !== "plan-ready") return failure("No plan to discard");
+    setTicket(projectId, ticket.key, { state: "not-started", plan: undefined, plannedAt: undefined });
+    return { ok: true };
+  });
   ipcMain.handle("tickets:unqueue", (_event, payload) => {
     const projectId = String(payload?.projectId || "");
     const ticket = tickets.get(projectId, String(payload?.key || ""));
@@ -758,7 +865,7 @@ function registerSessionIpc() {
     if (!project) return failure("Unknown project");
     const id = randomUUID();
     const result = await startSession(project, { id, agent: String(payload?.agent || "claude"), branch: `pitlane/session-${id.slice(0, 8)}` });
-    return result.busy ? failure(busyMessage(result.error)) : result;
+    return result;
   });
   ipcMain.handle("workspaces:list", (_event, payload) => workspaceList(payload?.projectId));
   registerLiveChangesIpc();
@@ -780,7 +887,8 @@ function registerSessionIpc() {
     // Focus reports and the like are the terminal talking, not the owner answering.
     const quiet = isTerminalReply(data);
     if (!quiet && session?.attention && session.ticketKey && tickets.get(session.projectId, session.ticketKey)?.reason !== "unassigned") {
-      setTicket(session.projectId, session.ticketKey, { state: "working", reason: undefined });
+      // Answering a planner sends it back to planning, not to work nobody has approved.
+      setTicket(session.projectId, session.ticketKey, { state: planningSessions.has(session.id) ? "planning" : "working", reason: undefined });
     }
     sessions.write(payload?.id, data, { quiet });
   });
@@ -790,8 +898,34 @@ function registerSessionIpc() {
     const project = registry.get(String(payload?.projectId || ""));
     if (!project) return 0;
     // A session whose workspace still holds its uncommitted work stays until that work is parked.
-    const held = new Set(pool.slots(project).filter((slot) => slot.state === "held").map((slot) => slot.sessionId));
-    return sessions.clearEnded(project.id, { keep: (session) => held.has(session.id) });
+    const held = heldSessions(project);
+    const cleared = sessions.clearEnded(project.id, { keep: (session) => held.has(session.id) });
+    pruneLeftovers();
+    return cleared;
+  });
+  ipcMain.handle("sessions:delete", async (_event, payload) => {
+    const session = sessions.get(String(payload?.id || ""));
+    const project = session && registry.get(session.projectId);
+    if (!session || !project) return failure("Unknown session");
+    if (session.state === "running") {
+      const ended = new Promise((resolve) => {
+        const stop = sessions.onExit((gone) => { if (gone.id === session.id) { stop(); resolve(true); } });
+        setTimeout(() => { stop(); resolve(false); }, 10_000);
+      });
+      sessions.stop(session.id);
+      if (!(await ended)) return failure("The agent did not stop; try again");
+    }
+    try {
+      // Whatever its workspace kept is thrown away with it; a slot that is another session's by now is left alone.
+      if (session.slot && pool.owns(project, session.slot, session.id)) await pool.release(project, session.slot, session.id).catch(() => {});
+      if (session.slot && pool.owns(project, session.slot, session.id)) await pool.discard(project, session.slot, session.id);
+      sessions.remove(session.id);
+    } catch (error) {
+      return failure(error);
+    }
+    pruneLeftovers();
+    broadcastSessions(project.id);
+    return { ok: true };
   });
   ipcMain.handle("sessions:attach", (event, payload) => {
     const sender = event.sender;
@@ -931,6 +1065,20 @@ function registerIpc() {
     if (registry.get(payload?.id)) windows.openProject(payload.id, { from: BrowserWindow.fromWebContents(event.sender) });
     return { ok: true };
   });
+  ipcMain.handle("projects:attention", () => attention());
+  ipcMain.handle("projects:switch", (event, payload) => {
+    const project = registry.get(payload?.id);
+    const window = BrowserWindow.fromWebContents(event.sender);
+    if (!project || !window) return failure("Unknown project");
+    const { moved } = windows.switchTo(window, project.id);
+    if (moved) {
+      dropSubscriptions(event.sender.id);
+      window.setTitle(project.name);
+      window.setBackgroundColor(BACKGROUND[themeOf(project)]);
+      void loadRenderer(window, { project: project.id });
+    }
+    return { ok: true };
+  });
   ipcMain.handle("projects:status", (_event, payload) => registry.status(payload?.id));
   ipcMain.handle("projects:choose-folder", () => chooseFolder());
   ipcMain.handle("projects:locate", async (_event, payload) => {
@@ -954,17 +1102,11 @@ function registerIpc() {
         if (!Object.hasOwn(BACKGROUND, payload.theme)) return failure("Unknown theme");
         patch.theme = payload.theme;
       }
-      if (payload?.agentLimit !== undefined) patch.agentLimit = Math.min(3, Math.max(1, Math.round(Number(payload.agentLimit)) || 1));
       if (Array.isArray(payload?.localFiles)) patch.localFiles = payload.localFiles.filter((file) => typeof file === "string" && !file.includes("/"));
       const project = registry.update(payload?.id, patch);
       const after = themeOf(project);
       const window = windows.windowFor(project.id);
-      if (window && (before === "night-city") !== (after === "night-city")) {
-        // Transparency is fixed when a window is made, so it is made again in the same place; agents keep running.
-        pendingBounds.set(project.id, window.getBounds());
-        window.once("closed", () => setImmediate(() => windows.openProject(project.id)));
-        window.close();
-      } else if (window && before !== after) {
+      if (window && before !== after) {
         window.setBackgroundColor(BACKGROUND[after]);
       }
       return project;
@@ -1011,16 +1153,21 @@ app.whenReady().then(() => {
   dispatcher = createDispatcher({
     projects: () => registry.list(),
     book: tickets,
-    start: (project, item) => (item.key.startsWith("review:") ? startReview(project, item) : startTicket(project, item)),
+    start: (project, item) => (item.key.startsWith("review:") ? startReview(project, item) : wantsWork(item) ? startTicket(project, item) : startPlanning(project, item)),
     running: runningTicketSessions,
-    maxAgents: () => Math.min(9, Math.max(1, Number(settings().maxAgents) || 3)),
+    maxAgents: () => Infinity,
   });
   sessions.onChange(broadcastSessions);
   sessions.onExit((session) => {
     const project = registry.get(session.projectId);
     if (!project || !session.slot) return;
-    // A review's draft is read before its slot is reset; afterwards the file and the PR's commits are gone.
-    const readFirst = session.ticketKey?.startsWith("review:") && !quitting ? reviewDraftReady(project, session, { final: true }).catch(() => false) : Promise.resolve();
+    // A review's draft and a plan are read before the slot is reset; afterwards the file is gone.
+    const planning = planningSessions.has(session.id);
+    const readFirst = quitting || !session.ticketKey
+      ? Promise.resolve()
+      : session.ticketKey.startsWith("review:")
+        ? reviewDraftReady(project, session, { final: true }).catch(() => false)
+        : planning ? planReady(project, session, { final: true }).catch(() => {}) : Promise.resolve();
     void readFirst.then(() => pool.release(project, session.slot, session.id))
       .catch((error) => console.log(`[workspaces] release failed: ${error.message}`))
       .finally(() => {
@@ -1050,8 +1197,9 @@ app.whenReady().then(() => {
   void carryAllProjectMoves().catch((error) => console.log(`[projects] ${error.message}`));
   // Tickets the last run left working have no agent any more.
   for (const project of registry.list()) {
-    for (const ticket of tickets.list(project.id).filter((each) => each.state === "working")) {
-      if (sessions.get(ticket.sessionId)?.state !== "running") tickets.set(project.id, ticket.key, { state: "needs-you", reason: "Pitlane was closed while it worked" });
+    for (const ticket of tickets.list(project.id)) {
+      const patch = afterRestart(ticket);
+      if (patch && sessions.get(ticket.sessionId)?.state !== "running") tickets.set(project.id, ticket.key, patch);
     }
   }
   // No agent survives a quit, so slots the last run left busy are released (or held, if they kept work).

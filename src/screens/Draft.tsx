@@ -37,6 +37,8 @@ export function Draft({ project, ticket, onBack }: { project: Project; ticket: T
       if (action === "down") return setCursor((index) => Math.min(draft.comments.length - 1, index + 1));
       if (action === "up") return setCursor((index) => Math.max(0, index - 1));
       if (action === "edit") return setEditing(true);
+      // Nobody can approve or block their own PR, so its review stays a comment.
+      if (action === "verdict" && ticket.pr?.own) return;
       if (action === "verdict") return void save({ ...draft, verdict: VERDICTS[(VERDICTS.indexOf(draft.verdict) + 1) % VERDICTS.length] });
       if (action === "dropComment" && draft.comments[cursor]) {
         setCursor((index) => Math.max(0, Math.min(index, draft.comments.length - 2)));
@@ -69,7 +71,7 @@ export function Draft({ project, ticket, onBack }: { project: Project; ticket: T
   return (
     <>
       <header className="statusline">
-        <span className="hi glitch">{project.name}</span>
+        <span className="hi">{project.name}</span>
         <span className="lo">›</span>
         <span><span className="id">#{ticket.pr?.number}</span> {ticket.title} · review</span>
         <span className="spacer" />
@@ -112,7 +114,7 @@ export function Draft({ project, ticket, onBack }: { project: Project; ticket: T
       <footer className="hints">
         <span><span className="key">a</span> approve & post</span>
         <span><span className="key">e</span> edit</span>
-        <span><span className="key">v</span> verdict</span>
+        {ticket.pr?.own ? null : <span><span className="key">v</span> verdict</span>}
         <span><span className="key">x</span> drop comment</span>
         <span><span className="key">d</span> discard</span>
         <span><span className="key">esc</span> back</span>

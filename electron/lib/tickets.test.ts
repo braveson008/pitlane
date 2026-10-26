@@ -53,6 +53,17 @@ describe("ticket book", () => {
     expect(tickets.list("p")[0]).toMatchObject({ state: "needs-you", reason: "unassigned" });
   });
 
+  it("an unassigned ticket with a plan waiting is dropped; one being planned needs you", () => {
+    const tickets = book().make();
+    tickets.observe("p", [task("SHOP-1"), task("SHOP-2")], { baseline: false });
+    tickets.set("p", "SHOP-1", { state: "plan-ready", plan: "x" });
+    tickets.set("p", "SHOP-2", { state: "planning", sessionId: "s2" });
+    const result = tickets.observe("p", [task("OTHER-1")], { baseline: false });
+    expect(result.dropped).toEqual(["SHOP-1"]);
+    expect(result.flagged).toEqual(["SHOP-2"]);
+    expect(tickets.get("p", "SHOP-2")).toMatchObject({ state: "needs-you", reason: "unassigned" });
+  });
+
   it("next returns the oldest queued ticket", () => {
     const clock = book();
     const tickets = clock.make();
@@ -63,6 +74,15 @@ describe("ticket book", () => {
     tickets.set("p", "SHOP-5", { state: "working" });
     expect(tickets.next("p").key).toBe("SHOP-3");
     expect(tickets.next("other")).toBeUndefined();
+  });
+
+  it("a done ticket lets go of its plan", () => {
+    const tickets = book().make();
+    tickets.observe("p", [task("SHOP-1")], { baseline: false });
+    tickets.set("p", "SHOP-1", { state: "in-review", plan: "x".repeat(1000) });
+    expect(tickets.get("p", "SHOP-1").plan).toBeDefined();
+    tickets.set("p", "SHOP-1", { state: "done" });
+    expect(tickets.get("p", "SHOP-1").plan).toBeUndefined();
   });
 
   it("records survive a new book on the same store", () => {
@@ -114,6 +134,38 @@ describe("ticket book", () => {
     tickets.observe("p", [{ ...task("review:2"), pr: { number: 2, head: "y" } }], { baseline: false, kind: "review" });
     expect(tickets.get("p", "SHOP-1").state).toBe("queued");
     expect(tickets.get("p", "review:1").state).toBe("needs-you");
+  });
+
+  it("each ticket watch judges only the tickets it found: a second watch never unassigns the first one's", () => {
+    const tickets = book().make();
+    tickets.observe("p", [task("SHOP-1")], { baseline: false, kind: "ticket", watchId: "w-plain" });
+    tickets.set("p", "SHOP-1", { state: "working" });
+    tickets.observe("p", [task("SHOP-9")], { baseline: false, kind: "ticket", watchId: "w-custom" });
+    expect(tickets.get("p", "SHOP-1").state).toBe("working");
+    expect(tickets.get("p", "SHOP-9").state).toBe("queued");
+    tickets.observe("p", [], { baseline: false, kind: "ticket", watchId: "w-custom" });
+    tickets.observe("p", [], { baseline: false, kind: "ticket", watchId: "w-custom" });
+    expect(tickets.get("p", "SHOP-9").state).toBe("dropped");
+    expect(tickets.get("p", "SHOP-1").state).toBe("working");
+  });
+
+  it("a ticket two watches found stays while either still finds it", () => {
+    const tickets = book().make();
+    tickets.observe("p", [task("SHOP-1")], { baseline: false, kind: "ticket", watchId: "a" });
+    tickets.observe("p", [task("SHOP-1"), task("SHOP-2")], { baseline: false, kind: "ticket", watchId: "b" });
+    tickets.observe("p", [task("SHOP-2")], { baseline: false, kind: "ticket", watchId: "a" });
+    expect(tickets.get("p", "SHOP-1").state).toBe("queued");
+    tickets.observe("p", [task("SHOP-2")], { baseline: false, kind: "ticket", watchId: "b" });
+    expect(tickets.get("p", "SHOP-1").state).toBe("dropped");
+  });
+
+  it("tickets from before watches were told apart are judged only by a watch that claims them", () => {
+    const tickets = book().make();
+    tickets.observe("p", [task("SHOP-1")], { baseline: false, kind: "ticket" });
+    tickets.observe("p", [task("SHOP-9")], { baseline: false, kind: "ticket", watchId: "w-custom", claimsUnmarked: false });
+    expect(tickets.get("p", "SHOP-1").state).toBe("queued");
+    tickets.observe("p", [task("SHOP-9")], { baseline: false, kind: "ticket", watchId: "w-plain", claimsUnmarked: true });
+    expect(tickets.get("p", "SHOP-1").state).toBe("dropped");
   });
 
   it("an untrusted review request waits for the owner instead of queueing", () => {

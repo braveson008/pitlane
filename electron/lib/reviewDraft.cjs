@@ -37,7 +37,7 @@ async function changedLines(cwd, base, git = runGit) {
 }
 
 /** The agent's review as a draft for the owner; it is read, checked and shown, and posts nothing. */
-function readDraft(slotPath, changed, { since = 0 } = {}) {
+function readDraft(slotPath, changed, { since = 0, own = false } = {}) {
   let raw;
   try {
     // A file from before the session (left in the slot, or shipped in the PR) is not this review.
@@ -59,7 +59,9 @@ function readDraft(slotPath, changed, { since = 0 } = {}) {
     if (!comment || typeof comment.path !== "string" || !comment.path || !Number.isInteger(line) || line < 1 || typeof comment.body !== "string" || !comment.body.trim()) continue;
     comments.push({ path: comment.path, line, body: comment.body, onDiff: Boolean(changed.get(comment.path)?.has(line)) });
   }
-  return { ok: true, draft: { summary: review.summary.trim(), verdict: VERDICTS.includes(review.verdict) ? review.verdict : "comment", comments } };
+  // Nobody can approve or block their own PR; the review of one is comments.
+  const verdict = !own && VERDICTS.includes(review.verdict) ? review.verdict : "comment";
+  return { ok: true, draft: { summary: review.summary.trim(), verdict, comments } };
 }
 
 /**
@@ -84,7 +86,7 @@ async function postDraft({ cwd, kind, repo, pr, draft, sha, env = {}, exec = run
         return { ok: false, error: error.message };
       }
     }
-    if (draft.verdict === "approve") {
+    if (draft.verdict === "approve" && !pr.own) {
       try {
         await exec("glab", ["mr", "approve", String(pr.number)], { cwd, env });
       } catch (error) {
@@ -102,7 +104,7 @@ async function postDraft({ cwd, kind, repo, pr, draft, sha, env = {}, exec = run
   }
   const payload = {
     ...(sha ? { commit_id: sha } : {}),
-    event: EVENT[draft.verdict] || "COMMENT",
+    event: pr.own ? "COMMENT" : EVENT[draft.verdict] || "COMMENT",
     body: draft.summary,
     comments: comments.map((comment) => ({ path: comment.path, line: comment.line, side: "RIGHT", body: comment.body })),
   };

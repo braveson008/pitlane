@@ -1,7 +1,7 @@
 {
   "name": "pitlane",
   "productName": "Pitlane",
-  "version": "0.1.4",
+  "version": "0.2.8",
   "private": true,
   "description": "One calm window per project for your coding agents.",
   "main": "electron/main.cjs",
@@ -83,7 +83,12 @@
       "hardenedRuntime": true,
       "entitlements": "build/entitlements.mac.plist",
       "entitlementsInherit": "build/entitlements.mac.inherit.plist",
-      "notarize": true
+      "notarize": true,
+      "extendInfo": {
+        "NSDesktopFolderUsageDescription": "Pitlane runs your coding agents in projects you keep on your Desktop.",
+        "NSDocumentsFolderUsageDescription": "Pitlane runs your coding agents in projects you keep in Documents.",
+        "NSDownloadsFolderUsageDescription": "Pitlane runs your coding agents in projects you keep in Downloads."
+      }
     },
     "afterPack": "./scripts/adhoc-sign.cjs",
     "afterSign": "./scripts/check-unpacked.cjs",

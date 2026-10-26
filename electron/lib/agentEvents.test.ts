@@ -4,7 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import { execFileSync } from "node:child_process";
 // eslint-disable-next-line @typescript-eslint/no-var-requires
-const { hookSettings, watchAgentEvents } = require("./agentEvents.cjs");
+const { hookSettings, watchAgentEvents, pruneAgentEvents } = require("./agentEvents.cjs");
 
 let dir: string;
 beforeEach(() => { dir = fs.mkdtempSync(path.join(os.tmpdir(), "pitlane-events-")); });
@@ -13,6 +13,14 @@ afterEach(() => fs.rmSync(dir, { recursive: true, force: true }));
 const hookScript = path.join(process.cwd(), "electron", "agentHook.cjs");
 
 describe("agent hook events", () => {
+  it("event files of sessions that are gone are deleted; others and other files stay", () => {
+    for (const name of ["kept.jsonl", "gone.jsonl", "notes.txt"]) fs.writeFileSync(path.join(dir, name), "{}\n");
+    expect(pruneAgentEvents(dir, new Set(["kept"]))).toBe(1);
+    expect(fs.readdirSync(dir).sort()).toEqual(["kept.jsonl", "notes.txt"]);
+    expect(pruneAgentEvents(path.join(dir, "missing"), new Set())).toBe(0);
+  });
+
+
   it("hook settings run the hook script for Notification and Stop", () => {
     const settings = JSON.parse(hookSettings({ sessionId: "s1", node: "/usr/bin/node", hookScript }));
     for (const event of ["Notification", "Stop"]) {

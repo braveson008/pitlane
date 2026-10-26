@@ -129,11 +129,21 @@ function createSessionManager({ spawn, resolveCommand, store, now = Date.now, ma
       session.stopped = true;
       pty.kill();
     },
+    /** Forgets one ended session; a running one has to be stopped first. */
+    remove(id) {
+      const session = sessions.get(id);
+      if (!session) return false;
+      if (session.state === "running") throw new Error("That agent is still running — stop it first (s s)");
+      sessions.delete(id);
+      live.delete(id);
+      changed(session.projectId);
+      return true;
+    },
     /** Forgets the project's ended sessions, except those `keep` says still matter (one holding kept work). */
-    clearEnded(projectId, { keep = () => false } = {}) {
+    clearEnded(projectId, { keep = () => false, before = Infinity } = {}) {
       let removed = 0;
       for (const session of [...sessions.values()]) {
-        if (session.projectId !== projectId || session.state === "running" || keep(session)) continue;
+        if (session.projectId !== projectId || session.state === "running" || keep(session) || !((session.endedAt ?? 0) < before)) continue;
         sessions.delete(session.id);
         live.delete(session.id);
         removed += 1;

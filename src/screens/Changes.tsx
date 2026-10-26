@@ -102,7 +102,7 @@ export function Changes({ project, session, onBack }: { project: Project; sessio
   return (
     <>
       <header className="statusline">
-        <span className="hi glitch">{project.name}</span>
+        <span className="hi">{project.name}</span>
         <span className="lo">›</span>
         <span>{session.name} · changes</span>
         <span className="spacer" />

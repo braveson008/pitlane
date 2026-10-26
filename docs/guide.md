@@ -21,7 +21,14 @@ This guide follows the order you meet things in.
 
 ## 1. First launch
 
-Pitlane opens on a project picker. Choose **Open folder…** and pick a git repository. The project gets its own window, and an entry in the Dock menu so you can open it directly next time. Open as many projects as you like; each one is a separate window with its own agents.
+Pitlane opens on a project picker. Choose **Open folder…** and pick a git repository. The project opens, and from then on every project you add is a tab at the top of the window, beside the traffic lights:
+
+- **Switch** by clicking a tab, or with ⌘1 to ⌘9 for the first nine tabs. The window shows that project instead; nothing else opens.
+- **See what waits on you elsewhere:** a tab shows `!2` when two things in that project wait on you (a ticket that needs you, a plan or review draft to read, an agent asking a question).
+- **Add** a project with `+` at the end of the tabs, which asks for a folder (macOS asks once for access if it is on your Desktop or in Documents).
+- Agents and watches keep running in the projects you are not looking at.
+
+If you want two projects side by side, ⌘N opens the picker, and a project opened from there gets its own window.
 
 What you need installed:
 
@@ -35,12 +42,12 @@ Pitlane uses the project's own GitHub or GitLab account, read from `gh`/`glab`, 
 
 ## 2. The home screen
 
-![Home screen](screenshots/vt220.png)
+![Home screen](screenshots/github-dark.png)
 
 Everything about a project is on one screen, top to bottom:
 
 1. **Needs you** (marked `!`): a ticket whose agent asked a question or stopped without a PR, and review drafts waiting for your approval. These are always at the top.
-2. **Sessions**: every agent session, running first. Each row shows the ticket (if any), the agent, its state and its age. The line above says how many workspaces are in use, and how many sessions have ended (`C` clears those).
+2. **Sessions**: every agent session, running first. Each row shows the ticket (if any), the agent, its state and its age. The line above says how many sessions have ended (`C` clears those).
 3. **Up next**: tickets and reviews that will start by themselves, numbered in the order they will start. The line above says whether one is starting now or waiting for a workspace.
 4. **Not started**: tickets that were already assigned to you when you switched a watch on, tickets already under way in the tracker (in progress, in review, in QA), tickets another project has already taken, plus review requests from people outside the repository's team. Each row shows the ticket's own tracker status. Pitlane never starts these by itself. They are folded into one line until you press `a`.
 5. **In review**: tickets whose pull request is open, with a link to it (`p` opens it).
@@ -68,7 +75,8 @@ Closing a window never stops its agents. Reopen the project and they are still t
 On the home screen:
 
 - `s s` stops the selected session's agent. Its workspace and changes are kept. If it was working on a ticket, the ticket waits for you under *needs you*.
-- `C` clears ended sessions from the list. A session whose workspace still holds unsaved work stays until you park it.
+- `C` clears ended sessions from the list. A session whose workspace still holds unsaved work stays until you park it. Ended sessions also clear themselves a day after they end, and a done ticket lets go of its plan, so Pitlane's own data stays small. The workspaces are the only large thing: there is one per running agent, and when a session ends its workspace is cleaned and, unless it is the one clean workspace kept ready for the next session, removed from disk.
+- `X` deletes the selected session at once, with no second press: a running agent is stopped first, the session leaves the list, and whatever its workspace kept, uncommitted or not, is thrown away.
 
 When an agent asks something (Claude's notification hook), its row is marked `!`, it moves to the top, and macOS shows a notification. Typing an answer clears the mark.
 
@@ -76,7 +84,7 @@ When an agent asks something (Claude's notification hook), its row is marked `!`
 
 Agents never run in your checkout. Each project has a small pool of **reusable workspaces**: git worktrees under `~/Library/Application Support/Pitlane/workspaces/`. A session switches a free workspace to its branch instead of cloning the project again, so there is no pile-up of copies.
 
-- **How many agents at once:** `L` cycles 1, 2 or 3 per project (the default is 1). Across all projects at most three unattended agents run at a time.
+- **How many agents at once:** as many as you start. Every ticket up next starts straight away, each in its own workspace.
 - **Local files:** the first time you start an agent, Pitlane lists the git-ignored files at the project root (`.env`, `*.local.*`) and asks which to copy into workspaces. They are copied, never linked, and copied again only when your original changes.
 - **Dependencies** are installed in a workspace when its lockfile changes.
 - **Held workspaces:** when an agent ends with uncommitted work, its workspace is *held* rather than wiped, so nothing is lost. `x x` on that session *parks* it: the work is committed locally on its branch and the workspace is freed.
@@ -92,40 +100,57 @@ There are two kinds:
 | Watch | Looks at | How |
 |---|---|---|
 | **Tickets assigned to me** | Jira or Linear | Asks Claude (Sonnet by default) to list your open tickets through the tracker's MCP server, **read-only**: every tool except the tracker's audited read-only ones is refused |
+| **Tickets I describe** | Jira or Linear | The same, read-only, but Claude looks for what you wrote in your own words (*unassigned bugs labelled frontend in the current sprint*) instead of your open tickets |
 | **PRs that need my review** | GitHub or GitLab | `gh search prs --review-requested=@me` or `glab mr list --reviewer=@me` |
 
 On the watches screen:
 
 | Key | Does |
 |---|---|
-| `a` | add a watch: one per tracker server Claude knows for this project, and the review watch |
+| `a` | add a watch: one per tracker server Claude knows for this project, a *Tickets I describe* watch for each (type what to look for, then enter), and the review watch |
 | `e` / `enter` | edit the selected watch |
 | `space` | switch it on or off |
-| `r` | check now instead of waiting for the interval |
+| `r` | run the selected watch now instead of waiting for its interval; a paused watch runs once and stays paused |
+| `R` | run every watch that is on now |
 | `x x` | remove it (what it already found stays on the home screen) |
 | `esc` | back home |
 
 ![Editing a watch](screenshots/watch-edit.png)
 
+![A watch in your own words](screenshots/watch-describe.png)
+
 When editing (`↑↓` moves between fields, `←→` changes one):
 
 - **tracker**: which Jira or Linear server to read, if Claude has more than one.
+- **looks for**: your own words for which tickets to find; Enter to type, and an empty line goes back to *assigned to me and still open*. Tickets it finds go through the same plan-first flow, and each watch only ever drops or flags the tickets it found itself.
 - **only from**: narrow the watch to one Jira project, Linear team or site, such as `SHOP project`. Needed whenever two projects watch the same tracker: without it, each gets every ticket assigned to you. Pitlane warns on both screens when two projects' watches would get the same tickets, and never lets two projects start the same ticket. A new ticket watch starts scoped to the keys the repository's branches and commits use (`SHOP`, `ADMIN or OPS`), and the editor shows that suggestion for an unscoped one: Enter on **only from** fills it in.
 - **checks**: every 5, 10, 30 or 60 minutes.
 - **model**: Sonnet, Haiku or Opus for reading the tracker.
 
-**The first check only takes note.** When a watch is switched on for the first time, or after you change its tracker or scope, whatever is already assigned to you goes under *Not started* instead of starting: switching a watch on never starts ten agents at once. From then on, a ticket newly assigned to you goes to *Up next* and starts when a workspace is free, but only if the tracker files it under To Do (Jira's status category, Linear's backlog or unstarted). A ticket already in progress, in review or in QA is listed under *Not started*, and one that moves on while it waits leaves Up next by itself; one that is done drops off. Press `a` on the home screen to see the not-started tickets, and `enter` on one to put it up next. `x` on an Up next ticket takes it back out.
+**The first check only takes note.** When a watch is switched on for the first time, or after you change its tracker, what it looks for, or its scope, whatever is already assigned to you goes under *Not started* instead of starting: switching a watch on never starts ten agents at once. From then on, a ticket newly assigned to you goes to *Up next* and starts straight away, but only if the tracker files it under To Do (Jira's status category, Linear's backlog or unstarted). A ticket already in progress, in review or in QA is listed under *Not started*, and one that moves on while it waits leaves Up next by itself; one that is done drops off. Press `a` on the home screen to see the not-started tickets, and `enter` on one to put it up next. `x` on an Up next ticket takes it back out.
 
 ## 6. How a ticket gets done
 
-When a ticket starts, the project's lead agent (Claude by default) gets the ticket's full text, read from the tracker word for word and fenced as data, not instructions. It works on its own branch:
+**First, a plan.** A ticket assigned to you is planned before anyone writes code. A planning agent reads the ticket and the code at your trunk, in a workspace on no branch, and writes a plan with these sections: Understanding, Approach, Files, Tests, and Risks and questions. It changes nothing else. The plan appears at the top of the home screen as *plan ready*, and you get a notification.
+
+![A plan waiting for you](screenshots/plan.png)
+
+Open it with `enter`:
+
+| Key | Does |
+|---|---|
+| `s s` | start work: press twice |
+| `d d` | discard the plan; the ticket goes back to *Not started*, and starting it again plans again |
+| `j` / `k` | scroll |
+
+**Then, the work.** When you start work, the project's lead agent (Claude by default) gets the ticket's full text, read from the tracker word for word and fenced as data, not instructions. It works on its own branch:
 
 - named after the ticket, like `shop-12-fix-the-cart`, cut from your trunk and not tracking it;
 - or, if a branch for the ticket key already exists on the remote, that branch, continued.
 
 The workflow it is given:
 
-1. Read the code and plan, using subagents for research when it helps.
+1. Follow the approved plan, and say in the pull request if the code shows the plan was wrong.
 2. Implement, following the project's conventions and its `CLAUDE.md` or `AGENTS.md`.
 3. Run the tests, typecheck and lint, and fix what fails.
 4. **Self-review:** a review subagent reads the diff against the ticket for bugs, missed requirements and leftover debugging, and the agent fixes what it finds.
@@ -135,15 +160,15 @@ Then Pitlane follows the pull request:
 
 - **Opened**: the ticket moves to *In review* and the workspace is handed back.
 - **Merged or closed**: the ticket is done.
-- **Changes requested, new comments (inline or not), or failing CI**: the ticket goes back to *Up next*, ahead of new tickets, and the agent gets the feedback with the same branch. Only feedback from the repository's owners, members and collaborators counts, never from bots or passers-by. After three rounds on the same pull request, a person is asked instead.
+- **Changes requested, new comments (inline or not), or failing CI**: the ticket goes back to *Up next* with no new plan, ahead of new tickets, and the agent gets the feedback with the same branch. Only feedback from the repository's owners, members and collaborators counts, never from bots or passers-by. After three rounds on the same pull request, a person is asked instead.
 - **The agent stopped without a PR, or asked something**: the ticket is marked *needs you*, with the reason.
 - **Unassigned from you**: marked *needs you*, and never started again on its own.
 
 If Claude reports a usage limit, Pitlane pauses starting new work until the limit resets, and says so on the home screen.
 
-## 7. Reviewing teammates' pull requests
+## 7. Reviewing pull requests
 
-With the review watch on, a pull request that asks for your review is reviewed **before** new tickets. The review agent checks out the PR in a detached workspace and writes a draft review: a summary, a verdict (approve, comment or request changes), and comments on specific lines.
+With the review watch on, a pull request that asks for your review, **or one you opened yourself**, is reviewed **before** new tickets. Your own PRs on branches Pitlane's tickets worked on are skipped: those were reviewed before they were pushed. A review of your own PR can only be a comment, since nobody can approve or block their own PR. The review agent checks out the PR in a detached workspace and writes a draft review: a summary, a verdict (approve, comment or request changes), and comments on specific lines.
 
 ![A review draft](screenshots/review-draft.png)
 
@@ -182,10 +207,11 @@ The draft appears at the top of the home screen as *review ready*. Open it with 
 
 | | |
 |---|---|
-| ![VT220](screenshots/vt220.png) **VT220**: amber phosphor | ![Acme](screenshots/acme.png) **Acme**: pale paper, commands in a tag line you click |
-| ![Night City](screenshots/night-city.png) **Night City**: neon yellow, cut corners, scanlines | ![Green Screen](screenshots/green-screen.png) **Green Screen**: green phosphor and faint scanlines |
-| ![Daylight](screenshots/daylight.png) **Daylight**: a plain light theme | ![Synthwave](screenshots/synthwave.png) **Synthwave**: violet with neon headings |
-| ![Midnight](screenshots/midnight.png) **Midnight**: a quiet dark blue | |
+| ![GitHub Dark](screenshots/github-dark.png) **GitHub Dark** (the default) | ![Nord](screenshots/nord.png) **Nord** |
+| ![Atom One Dark](screenshots/one-dark.png) **Atom One Dark** | ![Dracula](screenshots/dracula.png) **Dracula** |
+| ![Tokyo Night](screenshots/tokyo-night.png) **Tokyo Night** | |
+
+A project whose theme was one of the earlier ones (VT220, Acme, Night City and the rest) opens in GitHub Dark.
 
 ## 10. Updates
 
@@ -201,11 +227,12 @@ Restarting stops running agents (you are asked first). Their workspaces, branche
 
 | Where | Keys |
 |---|---|
-| Home | `enter` open · `n` new session · `w` watches · `a` show/hide not started · `x` take out of up next · `s s` stop agent · `C` clear ended · `c` changes · `p` open PR · `x x` park held session · `L` agents at once · `t` theme · `U` update · `?` help · `⌘K` switcher |
-| Watches | `a` add · `e` edit · `space` on/off · `r` check now · `x x` remove · `esc` back |
+| Home | `enter` open · `n` new session · `w` watches · `r` run watches now · `a` show/hide not started · `x` take out of up next · `s s` stop agent · `C` clear ended · `c` changes · `p` open PR · `x x` park held session · `X` delete session · `t` theme · `U` update · `?` help · `⌘K` switcher |
+| Watches | `a` add · `e` edit · `space` on/off · `r` run now · `R` run all · `x x` remove · `esc` back |
 | Session | everything goes to the agent · `⌘↑` home · `⌘K` switcher · `⌥⌘←/→` prev/next · `⌘D` changes |
 | Changes | `k` keep · `r` revert · `R` revert hunk · `K` keep all · `X X` revert all · `j`/`J` files/hunks · `esc` back |
 | Review draft | `a a` approve & post · `e` edit · `v` verdict · `x` drop comment · `d d` discard · `esc` back |
+| Plan | `s s` start work · `d d` discard · `j`/`k` scroll · `esc` back |
 
 ## 12. Troubleshooting
 

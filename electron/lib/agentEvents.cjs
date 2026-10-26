@@ -62,4 +62,21 @@ function watchAgentEvents(dir, onEvent) {
   };
 }
 
-module.exports = { hookSettings, watchAgentEvents };
+/** Deletes the event files of sessions that no longer exist; returns how many went. */
+function pruneAgentEvents(dir, keepIds) {
+  let removed = 0;
+  let names = [];
+  try {
+    names = fs.readdirSync(dir);
+  } catch {
+    return 0;
+  }
+  for (const name of names) {
+    if (!name.endsWith(".jsonl") || keepIds.has(name.slice(0, -".jsonl".length))) continue;
+    fs.rmSync(path.join(dir, name), { force: true });
+    removed += 1;
+  }
+  return removed;
+}
+
+module.exports = { hookSettings, watchAgentEvents, pruneAgentEvents };

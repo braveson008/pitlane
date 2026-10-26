@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { api, type Project, type Watch, type WatchKind } from "../api";
 import { ago } from "../lib/sessionOrder";
-import { INTERVALS, MODELS, overlapNote, watchTitle, watchSource } from "../lib/watches";
+import { INTERVALS, MODELS, overlapNote, watchNotes, watchTitle, watchSource } from "../lib/watches";
 
 interface WatchesProps {
   project: Project;
@@ -9,8 +9,10 @@ interface WatchesProps {
   onBack: () => void;
 }
 
-type Field = "server" | "scope" | "interval" | "model";
-type Choice = { kind: WatchKind; server?: string };
+type Field = "server" | "instructions" | "scope" | "interval" | "model";
+type Text = "instructions" | "scope";
+/** `describe`: a ticket watch whose instructions the owner writes before it is added. */
+type Choice = { kind: WatchKind; server?: string; describe?: boolean };
 
 /** For each of the project's watches, the other projects whose watch gets the same tickets. */
 export function useOverlaps(project: Project) {
@@ -38,7 +40,8 @@ export function Watches({ project, onProject, onBack }: WatchesProps) {
   const [servers, setServers] = useState<string[]>([]);
   const [adding, setAdding] = useState<number | null>(null);
   const [editing, setEditing] = useState<Field | null>(null);
-  const [scope, setScope] = useState<string | null>(null);
+  const [typing, setTyping] = useState<{ field: Text; value: string } | null>(null);
+  const [describing, setDescribing] = useState<{ server: string; value: string } | null>(null);
   const [removing, setRemoving] = useState<string | null>(null);
   const [error, setError] = useState("");
   const [now, setNow] = useState(Date.now());
@@ -59,10 +62,11 @@ export function Watches({ project, onProject, onBack }: WatchesProps) {
   }, [removing]);
 
   const choices: Choice[] = [
-    ...servers.filter((server) => !watches.some((watch) => watch.kind === "ticket-assigned" && watch.server === server && !watch.scope)).map((server) => ({ kind: "ticket-assigned" as const, server })),
+    ...servers.filter((server) => !watches.some((watch) => watch.kind === "ticket-assigned" && watch.server === server && !watch.scope && !watch.instructions)).map((server) => ({ kind: "ticket-assigned" as const, server })),
+    ...servers.map((server) => ({ kind: "ticket-assigned" as const, server, describe: true })),
     ...(watches.some((watch) => watch.kind === "review-requested") ? [] : [{ kind: "review-requested" as const }]),
   ];
-  const fields: Field[] = current?.kind === "ticket-assigned" ? ["server", "scope", "interval", "model"] : ["interval", "model"];
+  const fields: Field[] = current?.kind === "ticket-assigned" ? ["server", "instructions", "scope", "interval", "model"] : ["interval", "model"];
 
   async function act(work: () => Promise<Project | { error: string }>) {
     setError("");
@@ -80,16 +84,23 @@ export function Watches({ project, onProject, onBack }: WatchesProps) {
     if (field === "server" && servers.length > 1) return void act(() => api().watches.edit(project.id, current.id, { server: cycle(servers, current.server ?? servers[0], step) }));
   }
 
-  async function add(choice: Choice) {
+  async function add(choice: Choice, instructions?: string) {
     setAdding(null);
+    if (choice.describe && instructions === undefined) return setDescribing({ server: choice.server ?? "", value: "" });
+    setDescribing(null);
     const before = watches.length;
-    await act(() => api().watches.create(project.id, choice.kind, choice.server));
+    await act(() => api().watches.create(project.id, choice.kind, choice.server, instructions));
     setAt(before);
+  }
+
+  function save(field: Text, value: string) {
+    setTyping(null);
+    if (current) void act(() => api().watches.edit(project.id, current.id, { [field]: value }));
   }
 
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
-      if (event.metaKey || event.ctrlKey || event.altKey || scope !== null) return;
+      if (event.metaKey || event.ctrlKey || event.altKey || typing !== null || describing !== null) return;
       const down = event.key === "ArrowDown" || event.key === "j";
       const up = event.key === "ArrowUp" || event.key === "k";
       if (adding !== null) {
@@ -109,7 +120,8 @@ export function Watches({ project, onProject, onBack }: WatchesProps) {
         if (event.key === "ArrowRight" || event.key === "l" || event.key === " ") change(editing, 1);
         if (event.key === "ArrowLeft" || event.key === "h") change(editing, -1);
         if (event.key === "Enter") {
-          if (editing === "scope") setScope(current?.scope || suggested);
+          if (editing === "scope") setTyping({ field: "scope", value: current?.scope || suggested });
+          else if (editing === "instructions") setTyping({ field: "instructions", value: current?.instructions ?? "" });
           else change(editing, 1);
         }
         return;
@@ -129,6 +141,7 @@ export function Watches({ project, onProject, onBack }: WatchesProps) {
       if (event.key === "e" || event.key === "Enter") setEditing(fields[0]);
       if (event.key === " ") void act(() => api().watches.toggle(project.id, current.id));
       if (event.key === "r") void act(() => api().watches.check(project.id, current.id));
+      if (event.key === "R") void act(() => api().watches.checkAll(project.id));
       if (event.key === "x") {
         if (removing !== current.id) setRemoving(current.id);
         else {
@@ -145,11 +158,12 @@ export function Watches({ project, onProject, onBack }: WatchesProps) {
   const value = (field: Field) => {
     if (!current) return "";
     if (field === "server") return current.server ?? "none";
-    if (field === "scope") return current.scope || `everything assigned to me${suggested ? ` · this repository uses ${suggested}` : ""}`;
+    if (field === "instructions") return current.instructions || "assigned to me and still open";
+    if (field === "scope") return current.scope || `everywhere${suggested ? ` · this repository uses ${suggested}` : ""}`;
     if (field === "interval") return `every ${Math.round(current.intervalSeconds / 60)}m`;
     return current.model;
   };
-  const label: Record<Field, string> = { server: "tracker", scope: "only from", interval: "checks", model: "model" };
+  const label: Record<Field, string> = { server: "tracker", instructions: "looks for", scope: "only from", interval: "checks", model: "model" };
 
   return (
     <>
@@ -167,10 +181,10 @@ export function Watches({ project, onProject, onBack }: WatchesProps) {
           <div className="rows">{watches.map((watch, index) => (
             <button key={watch.id} type="button" className={`row${index === at && !editing ? " sel" : ""}`} onClick={() => setAt(index)}>
               <span className={watch.lastError ? "need" : watch.enabled ? "ok" : "lo"}>{watch.enabled ? "●" : "○"}</span>
-              <span>{watchTitle(watch)} <span className="id">{watchSource(watch, project)}</span>{watch.scope ? <span className="lo"> · only {watch.scope}</span> : null}</span>
+              <span>{watchTitle(watch)} <span className="id">{watchSource(watch, project)}</span><span className="lo">{watchNotes(watch)}</span></span>
               <span className="agent">{watch.model}</span>
               <span className={watch.lastError ? "need" : watch.enabled ? "ok" : "lo"}>{watch.lastError ? "error" : watch.enabled ? `on · every ${Math.round(watch.intervalSeconds / 60)}m` : "paused"}</span>
-              <span className="lo right">{watch.lastCheckedAt ? `checked ${ago(watch.lastCheckedAt, now)}` : "not checked yet"}</span>
+              <span className={watch.due ? "id right" : "lo right"}>{watch.due ? "checking now…" : watch.lastCheckedAt ? `checked ${ago(watch.lastCheckedAt, now)}` : "not checked yet"}</span>
             </button>
           ))}</div>
           {current?.lastError ? <p className="need">  {current.lastError}</p> : null}
@@ -185,32 +199,29 @@ export function Watches({ project, onProject, onBack }: WatchesProps) {
               <p key={field} className={`row${field === editing ? " sel" : ""}`}>
                 <span className="lo">{field === editing ? "›" : " "}</span>
                 <span><span className="lo">{label[field]} </span>
-                  {field === "scope" && scope !== null ? (
+                  {typing && typing.field === field ? (
                     <input
-                      aria-label="Only from"
+                      aria-label={field === "scope" ? "Only from" : "Looks for"}
                       className="inline-input"
                       autoFocus
-                      value={scope}
-                      placeholder="a Jira project key, Linear team, or site"
-                      onChange={(event) => setScope(event.target.value)}
+                      maxLength={field === "scope" ? 120 : 500}
+                      value={typing.value}
+                      placeholder={field === "scope" ? "a Jira project key, Linear team, or site" : "in your words · empty for assigned to me"}
+                      onChange={(event) => setTyping({ field: typing.field, value: event.target.value })}
                       onKeyDown={(event) => {
                         event.stopPropagation();
-                        if (event.key === "Escape") setScope(null);
-                        if (event.key === "Enter") {
-                          const next = scope;
-                          setScope(null);
-                          void act(() => api().watches.edit(project.id, current.id, { scope: next }));
-                        }
+                        if (event.key === "Escape") setTyping(null);
+                        if (event.key === "Enter") save(typing.field, typing.value);
                       }}
                     />
                   ) : <span className="hi">{value(field)}</span>}
                 </span>
-                <span className="lo">{field === "scope" ? "enter to type" : field === "server" && servers.length < 2 ? "" : "← →"}</span>
+                <span className="lo">{field === "scope" || field === "instructions" ? "enter to type" : field === "server" && servers.length < 2 ? "" : "← →"}</span>
                 <span />
                 <span />
               </p>
             ))}</div>
-            <p className="lo">  Changing the tracker or scope starts it fresh: what is already assigned there is listed, not started.</p>
+            <p className="lo">  Changing the tracker, what it looks for, or the scope starts it fresh: what it finds there now is listed, not started.</p>
           </section>
         ) : null}
 
@@ -218,19 +229,48 @@ export function Watches({ project, onProject, onBack }: WatchesProps) {
           <section className="section" aria-label="Add watch">
             <p className="hi heading">ADD A WATCH</p>
             <div className="rows">{choices.map((choice, index) => (
-              <button key={`${choice.kind}:${choice.server ?? ""}`} type="button" className={`row${index === adding ? " sel" : ""}`} onClick={() => void add(choice)}>
+              <button key={`${choice.kind}:${choice.server ?? ""}:${choice.describe ? "describe" : ""}`} type="button" className={`row${index === adding ? " sel" : ""}`} onClick={() => void add(choice)}>
                 <span className="lo">{index === adding ? "›" : " "}</span>
-                <span>{watchTitle(choice)} <span className="id">{watchSource(choice, project)}</span></span>
+                <span>{choice.describe ? "Tickets I describe" : watchTitle(choice)} <span className="id">{watchSource(choice, project)}</span>{choice.describe ? <span className="lo"> · in your own words</span> : null}</span>
                 <span /><span /><span />
               </button>
             ))}</div>
           </section>
         ) : null}
 
+        {describing ? (
+          <section className="section" aria-label="Describe watch">
+            <p className="hi heading">TICKETS I DESCRIBE · {describing.server}</p>
+            <p className="lo">Say what to look for, the way you would ask a teammate. Matching tickets are planned first, like assigned ones.</p>
+            <input
+              aria-label="Looks for"
+              className="inline-input"
+              autoFocus
+              maxLength={500}
+              value={describing.value}
+              placeholder="unassigned bugs labelled frontend in the current sprint"
+              onChange={(event) => setDescribing({ ...describing, value: event.target.value })}
+              onKeyDown={(event) => {
+                event.stopPropagation();
+                if (event.key === "Escape") setDescribing(null);
+                if (event.key === "Enter") {
+                  if (!describing.value.trim()) return setError("say what the watch should look for");
+                  void add({ kind: "ticket-assigned", server: describing.server, describe: true }, describing.value);
+                }
+              }}
+            />
+          </section>
+        ) : null}
+
         {error ? <p className="need" role="alert">{error}</p> : null}
       </div>
       <footer className="hints">
-        {editing ? (
+        {describing || typing ? (
+          <>
+            <span><span className="key">enter</span> save</span>
+            <span><span className="key">esc</span> cancel</span>
+          </>
+        ) : editing ? (
           <>
             <span><span className="key">↑ ↓</span> field</span>
             <span><span className="key">← →</span> change</span>
@@ -246,7 +286,8 @@ export function Watches({ project, onProject, onBack }: WatchesProps) {
             <span><span className="key">a</span> add</span>
             <span><span className="key">e</span> edit</span>
             <span><span className="key">space</span> on/off</span>
-            <span><span className="key">r</span> check now</span>
+            <span><span className="key">r</span> run now</span>
+            <span><span className="key">R</span> run all</span>
             <span><span className="key">x x</span> remove</span>
             <span><span className="key">esc</span> back</span>
           </>

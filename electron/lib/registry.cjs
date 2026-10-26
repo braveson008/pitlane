@@ -30,7 +30,7 @@ function createRegistry({ file, git = runGit }) {
       const found = await inspect(folder);
       const existing = projects.find((project) => project.path === found.path && project.rootCommit === found.rootCommit);
       if (existing) return existing;
-      const project = { id: randomUUID(), name: path.basename(found.path), ...found, agentLimit: 1, createdAt: Date.now() };
+      const project = { id: randomUUID(), name: path.basename(found.path), ...found, createdAt: Date.now() };
       projects.push(project);
       save();
       return project;

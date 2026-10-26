@@ -41,11 +41,9 @@ try {
   console.log("PASS the agent works in a workspace slot on its own branch, with .env copied in");
 
   await project.keyboard.press("Meta+ArrowUp");
-  await sessions.getByText("workspaces 1/1").waitFor();
-  await project.keyboard.press("n");
-  await project.keyboard.press("Enter");
-  await project.getByText("All 1 workspace is busy").waitFor();
-  console.log("PASS at the limit, a new session says the workspace is busy");
+  const projectId = new URL(project.url()).searchParams.get("project");
+  const slotsOf = (page) => page.evaluate((id) => window.pitlane.workspaces.list(id), projectId);
+  const allFree = async (page) => (await slotsOf(page)).every((each) => each.state === "free");
 
   await sessions.getByRole("button", { name: /New session · claude/ }).click();
   await project.locator(".terminal[data-session]").waitFor();
@@ -60,7 +58,7 @@ try {
   await project.keyboard.press("x");
   await project.getByText("park? x again").waitFor();
   await project.keyboard.press("x");
-  await sessions.getByText("workspaces 0/1").waitFor();
+  await until("the slot freed", () => allFree(project));
   assert.equal(gitIn(repo)("log", "-1", "--format=%s", branch), "WIP: parked by Pitlane");
   console.log("PASS an ended session with work holds its slot until parked, and parking keeps the work");
 
@@ -104,11 +102,10 @@ try {
   await (await import("node:fs/promises")).mkdir(shots, { recursive: true });
   const id = new URL(project.url()).searchParams.get("project");
   let page = project;
-  for (const theme of ["vt220", "acme", "night-city"]) {
-    await page.evaluate(({ id, theme }) => window.pitlane.projects.update(id, { theme }), { id, theme }).catch(() => {});
-    await new Promise((resolve) => setTimeout(resolve, 800));
-    page = await projectWindow(app);
+  for (const theme of ["github-dark", "nord", "dracula"]) {
+    assert.equal((await page.evaluate(({ id, theme }) => window.pitlane.projects.update(id, { theme }), { id, theme })).theme, theme);
     await page.reload();
+    assert.equal(await page.evaluate(() => document.documentElement.dataset.theme), theme);
     await page.getByLabel("Sessions").getByRole("button", { name: /New session · claude/ }).first().waitFor();
     const running = page.getByLabel("Sessions").getByRole("button", { name: /running/ }).first();
     await running.click();
@@ -135,19 +132,19 @@ try {
   await page.keyboard.press("Enter");
   await page.keyboard.press("Meta+ArrowUp");
   // The row stops saying running a moment before the slot's release settles into held or free.
-  await until("the slot held or freed", async () => /held|workspaces 0\/1/.test(await list.innerText()));
+  await until("the slot held or freed", async () => /held/.test(await list.innerText()) || allFree(page));
   if (/held/.test(await list.innerText())) {
     await page.keyboard.press("x");
     await page.keyboard.press("x");
   }
-  await list.getByText("workspaces 0/1").waitFor();
+  await until("the slot freed", () => allFree(page));
   await page.keyboard.press("n");
   await page.keyboard.press("Enter");
   await page.locator(".xterm").waitFor();
   await page.keyboard.type("exit");
   await page.keyboard.press("Enter");
   await page.keyboard.press("Meta+ArrowUp");
-  await list.getByText("workspaces 0/1").waitFor();
+  await until("the slot freed", () => allFree(page));
   await page.keyboard.press("n");
   await page.keyboard.press("Enter");
   await page.locator(".xterm").waitFor();
@@ -164,6 +161,78 @@ try {
   assert.ok(gitIn(slot)("status", "--porcelain").includes("README.md"), "nothing was committed in the live slot");
   await page.keyboard.press("Escape");
   console.log("PASS an ended session's Changes view never touches the session now using its workspace");
+
+  // No limit: while that agent runs, two more get workspaces of their own; once both end, only one clean one stays.
+  const cwdOf = async () => {
+    await page.keyboard.type("pwd");
+    await page.keyboard.press("Enter");
+    const found = await until("the cwd", async () => [...(await terminalText(page)).matchAll(/cwd: (.+)/g)].pop());
+    return found[1].trim();
+  };
+  const extra = [];
+  for (let i = 0; i < 2; i += 1) {
+    await page.keyboard.press("n");
+    await page.keyboard.press("Enter");
+    await page.locator(".xterm").waitFor();
+    await until("the agent", async () => (await terminalText(page)).includes("fake agent ready"));
+    extra.push(await cwdOf());
+    if (i === 0) await page.keyboard.press("Meta+ArrowUp");
+  }
+  assert.equal(new Set([slot, ...extra]).size, 3, "each running agent has its own workspace");
+  // The second is on screen; the first is the newest of the other running ones.
+  await page.keyboard.type("exit");
+  await page.keyboard.press("Enter");
+  await page.keyboard.press("Meta+ArrowUp");
+  await until("one running besides the first", async () => (await list.getByRole("button", { name: /running/ }).count()) === 2);
+  await list.getByRole("button", { name: /running/ }).first().click();
+  await page.locator(".xterm").waitFor();
+  assert.equal(await cwdOf(), extra[0]);
+  await page.keyboard.type("exit");
+  await page.keyboard.press("Enter");
+  await page.keyboard.press("Meta+ArrowUp");
+  await until("one spare workspace left", async () => (await slotsOf(page)).filter((each) => each.state === "free").length === 1 && extra.filter((folder) => existsSync(folder)).length === 1);
+  console.log("PASS there is no limit on agents at once, and a finished session's spare workspace is removed from disk");
+
+  // X deletes an ended session along with the work its workspace kept.
+  await page.keyboard.press("n");
+  await page.keyboard.press("Enter");
+  await page.locator(".xterm").waitFor();
+  await until("the agent", async () => (await terminalText(page)).includes("fake agent ready"));
+  const doomed = await cwdOf();
+  await page.keyboard.type("touch wip.txt");
+  await page.keyboard.press("Enter");
+  await until("the file", async () => existsSync(path.join(doomed, "wip.txt")));
+  await page.keyboard.type("exit");
+  await page.keyboard.press("Enter");
+  await page.keyboard.press("Meta+ArrowUp");
+  await until("held", async () => /held · uncommitted/.test(await list.innerText()));
+  for (let i = 0; i < 12 && !/held · uncommitted/.test(await page.locator(".row.sel").first().innerText()); i += 1) await page.keyboard.press("j");
+  const rowsBefore = await list.getByRole("button").count();
+  await page.keyboard.press("X");
+  await until("the session gone", async () => (await list.getByRole("button").count()) === rowsBefore - 1 && !/held · uncommitted/.test(await list.innerText()));
+  assert.equal(existsSync(path.join(doomed, "wip.txt")), false, "its kept work is thrown away");
+  assert.ok((await slotsOf(page)).every((each) => each.state !== "held"));
+  console.log("PASS X deletes an ended session and the work its workspace kept");
+
+  // A running one too: its agent is stopped first, then it goes the same way.
+  await page.keyboard.press("n");
+  await page.keyboard.press("Enter");
+  await page.locator(".xterm").waitFor();
+  await until("the agent", async () => (await terminalText(page)).includes("fake agent ready"));
+  const live = await cwdOf();
+  await page.keyboard.type("touch live.txt");
+  await page.keyboard.press("Enter");
+  await until("the file", async () => existsSync(path.join(live, "live.txt")));
+  await page.keyboard.press("Meta+ArrowUp");
+  const runningRows = () => list.getByRole("button", { name: /running/ }).count();
+  const runningBefore = await runningRows();
+  // The newest running session is the first running row.
+  for (let i = 0; i < 12; i += 1) await page.keyboard.press("k");
+  for (let i = 0; i < 12 && !/running/.test(await page.locator(".row.sel").first().innerText()); i += 1) await page.keyboard.press("j");
+  await page.keyboard.press("X");
+  await until("the running session gone", async () => (await runningRows()) === runningBefore - 1);
+  await until("its work thrown away", async () => !existsSync(path.join(live, "live.txt")));
+  console.log("PASS X on a running session stops its agent and deletes it");
 
   assert.equal(git("branch", "--show-current"), before.branch);
   assert.equal(git("status", "--porcelain"), before.status);

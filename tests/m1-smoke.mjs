@@ -53,7 +53,6 @@ try {
   await project.getByText("shop").first().waitFor();
   const id = new URL(project.url()).searchParams.get("project");
   // This smoke runs two agents at once; milestone 2 gives each its own workspace.
-  await project.evaluate((projectId) => window.pitlane.projects.update(projectId, { agentLimit: 3 }), id);
   console.log("PASS opening a folder opens that project's window, and the picker closes");
 
   await until("the picker closed", async () => picker.isClosed());
@@ -105,14 +104,12 @@ try {
   console.log("PASS coming back to a session shows what it printed while away");
 
   const themeNow = () => project.evaluate(() => document.documentElement.dataset.theme);
-  assert.equal(await themeNow(), "vt220");
+  assert.equal(await themeNow(), "github-dark");
   const seen = [];
-  const cycle = ["acme", "night-city", "green-screen", "daylight", "synthwave", "midnight", "vt220"];
+  const cycle = ["nord", "one-dark", "dracula", "tokyo-night", "github-dark"];
   for (let i = 0; i < cycle.length; i += 1) {
-    // The press can be cut short when it makes the window again.
-    await project.keyboard.press("t").catch(() => {});
+    await project.keyboard.press("t");
     const expected = cycle[i];
-    // Switching to or from Night City makes the window again.
     const page = await until(`theme ${expected}`, async () => {
       for (const candidate of app.windows()) {
         if (candidate.isClosed() || !candidate.url().includes("project=")) continue;
@@ -128,7 +125,7 @@ try {
     await project.getByLabel("Sessions").getByRole("button", { name: /New session · claude/ }).waitFor();
   }
   assert.deepEqual(seen, cycle);
-  console.log("PASS t cycles through all seven themes back to VT220 and the agent keeps running");
+  console.log("PASS t cycles through all five themes back to GitHub Dark and the agent keeps running");
 
   const status = () => project.locator(".statusline").innerText();
   await project.keyboard.press("n");
@@ -157,6 +154,8 @@ try {
   picker = await until("the picker from File → Open Project…", async () => app.windows().find((page) => !page.isClosed() && !page.url().includes("project=")));
   await picker.getByRole("button", { name: /shop/ }).waitFor();
   await assertNothingCut(picker, "picker with a project");
+  await mkdir(path.join(os.tmpdir(), "pitlane-shots"), { recursive: true });
+  await picker.screenshot({ path: path.join(os.tmpdir(), "pitlane-shots", "picker.png") });
   await picker.getByRole("button", { name: /shop/ }).click();
   project = await projectWindow(app);
   const rows = project.getByLabel("Sessions").getByRole("button", { name: /New session/ });
@@ -229,11 +228,11 @@ try {
   // A screenshot of home and of a session in each theme, to look over by eye.
   const shots = path.join(os.tmpdir(), "pitlane-shots");
   await mkdir(shots, { recursive: true });
-  for (const theme of ["vt220", "acme", "night-city", "green-screen", "daylight", "synthwave", "midnight"]) {
+  for (const theme of ["github-dark", "nord", "one-dark", "dracula", "tokyo-night"]) {
     const current = await project.evaluate(() => document.documentElement.dataset.theme);
     if (current !== theme) {
       await project.evaluate(({ id, theme }) => window.pitlane.projects.update(id, { theme }), { id, theme }).catch(() => {});
-      // Called directly rather than with t; a switch to or from Night City makes the window again, which takes a moment.
+      // Called directly rather than with t, so the window reloads to pick it up.
       project = await until(`the ${theme} window`, async () => {
         for (const candidate of app.windows()) {
           if (candidate.isClosed() || !candidate.url().includes("project=")) continue;
@@ -254,6 +253,30 @@ try {
     await project.keyboard.press("Meta+ArrowUp");
   }
   console.log(`PASS screenshots of every theme in ${shots}`);
+
+  // A second project: its tab sits beside the first, and ⌘2 shows it in this same window.
+  const cafe = path.join(temp, "cafe");
+  await mkdir(cafe, { recursive: true });
+  execFileSync("git", ["init", "-q", "-b", "main"], { cwd: cafe });
+  await writeFile(path.join(cafe, "README.md"), "# cafe\n");
+  execFileSync("git", ["-c", "user.email=a@b", "-c", "user.name=t", "add", "-A"], { cwd: cafe });
+  execFileSync("git", ["-c", "user.email=a@b", "-c", "user.name=t", "commit", "-qm", "root"], { cwd: cafe });
+  await project.evaluate((folder) => window.pitlane.projects.add(folder), cafe);
+  await project.evaluate(() => window.dispatchEvent(new Event("focus")));
+  const tabs = project.getByLabel("Projects");
+  await tabs.getByRole("button", { name: "cafe" }).waitFor();
+  const projectWindows = () => app.windows().filter((each) => !each.isClosed() && each.url().includes("project="));
+  const tabWindows = projectWindows().length;
+  await project.keyboard.press("Meta+2");
+  await until("cafe in the same window", async () => /No sessions yet/.test(await project.getByLabel("Sessions").innerText().catch(() => "")) && (await project.title()) === "cafe");
+  assert.equal(projectWindows().length, tabWindows, "switching does not open another window");
+  assert.equal(await project.getByLabel("Projects").locator("[aria-current=page]").innerText(), "cafe");
+  await project.screenshot({ path: path.join(shots, "project-tabs.png") });
+  await assertNothingCut(project, "project tabs");
+  await project.getByLabel("Projects").getByRole("button", { name: "shop" }).click();
+  await until("shop again, its agent still running", async () => /running/.test(await project.getByLabel("Sessions").innerText().catch(() => "")));
+  assert.equal(await project.title(), "shop");
+  console.log("PASS ⌘2 and the title-bar tabs switch projects in the same window, and agents keep running");
 } finally {
   await app.close();
 }
